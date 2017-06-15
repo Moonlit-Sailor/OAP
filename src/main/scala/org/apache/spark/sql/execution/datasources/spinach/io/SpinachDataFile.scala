@@ -35,9 +35,10 @@ import org.apache.spark.unsafe.Platform
 private[spinach] case class SpinachDataFile(path: String, schema: StructType) extends DataFile {
 
   private val dictionaries = new Array[Dictionary](schema.length)
+  private var meta: SpinachDataFileHandle = _
 
   def getDictionary(fiberId: Int, conf: Configuration): Dictionary = {
-    val meta: SpinachDataFileHandle = DataFileHandleCacheManager(this, conf)
+    meta = DataFileHandleCacheManager(this, conf)
     val lastGroupMeta = meta.rowGroupsMeta(meta.groupCount - 1)
     val dictDataLens = meta.dictionaryDataLens
 
@@ -62,7 +63,7 @@ private[spinach] case class SpinachDataFile(path: String, schema: StructType) ex
   }
 
   def getFiberData(groupId: Int, fiberId: Int, conf: Configuration): DataFiberCache = {
-    val meta: SpinachDataFileHandle = DataFileHandleCacheManager(this, conf)
+    meta = DataFileHandleCacheManager(this, conf)
     val groupMeta = meta.rowGroupsMeta(groupId)
 
     val codecFactory = new CodecFactory(conf)
@@ -115,7 +116,7 @@ private[spinach] case class SpinachDataFile(path: String, schema: StructType) ex
 
   // full file scan
   def iterator(conf: Configuration, requiredIds: Array[Int]): Iterator[InternalRow] = {
-    val meta: SpinachDataFileHandle = DataFileHandleCacheManager(this, conf)
+    meta = DataFileHandleCacheManager(this, conf)
     val row = new BatchColumn()
     val columns: Array[ColumnValues] = new Array[ColumnValues](requiredIds.length)
     (0 until meta.groupCount).iterator.flatMap { groupId =>
@@ -140,7 +141,7 @@ private[spinach] case class SpinachDataFile(path: String, schema: StructType) ex
   // scan by given row ids, and we assume the rowIds are sorted
   def iterator(conf: Configuration, requiredIds: Array[Int], rowIds: Array[Long])
   : Iterator[InternalRow] = {
-    val meta: SpinachDataFileHandle = DataFileHandleCacheManager(this, conf)
+    meta = DataFileHandleCacheManager(this, conf)
     val row = new BatchColumn()
     val columns: Array[ColumnValues] = new Array[ColumnValues](requiredIds.length)
     var lastGroupId = -1
@@ -179,5 +180,17 @@ private[spinach] case class SpinachDataFile(path: String, schema: StructType) ex
     val fs = p.getFileSystem(conf)
 
     new SpinachDataFileHandle().read(fs.open(p), fs.getFileStatus(p).getLen)
+  }
+
+  def closeFile(): Unit = {
+    // close fileHandler's finStream and evict file handler out of memory
+    DataFileHandleCacheManager.evictDataFileHandler(this)
+
+    // close fileHandler's finStream if it is not cached in memory previously
+    if (meta != null) {
+      if (meta.fin != null) meta.fin.close()
+
+      meta = null
+    }
   }
 }
