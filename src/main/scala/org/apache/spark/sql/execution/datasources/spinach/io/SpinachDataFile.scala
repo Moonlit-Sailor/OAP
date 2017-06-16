@@ -119,7 +119,7 @@ private[spinach] case class SpinachDataFile(path: String, schema: StructType) ex
     meta = DataFileHandleCacheManager(this, conf)
     val row = new BatchColumn()
     val columns: Array[ColumnValues] = new Array[ColumnValues](requiredIds.length)
-    (0 until meta.groupCount).iterator.flatMap { groupId =>
+    val iter = (0 until meta.groupCount).iterator.flatMap { groupId =>
       var i = 0
       while (i < columns.length) {
         columns(i) = new ColumnValues(
@@ -136,6 +136,15 @@ private[spinach] case class SpinachDataFile(path: String, schema: StructType) ex
         row.reset(meta.rowCountInLastGroup, columns).toIterator
       }
     }
+    new Iterator[InternalRow]() {
+      override def hasNext: Boolean = {
+        val hasNextRow = iter.hasNext
+        if (!hasNextRow) closeFile()
+        hasNextRow
+      }
+
+      override def next(): InternalRow = iter.next()
+    }
   }
 
   // scan by given row ids, and we assume the rowIds are sorted
@@ -145,7 +154,7 @@ private[spinach] case class SpinachDataFile(path: String, schema: StructType) ex
     val row = new BatchColumn()
     val columns: Array[ColumnValues] = new Array[ColumnValues](requiredIds.length)
     var lastGroupId = -1
-    (0 until rowIds.length).iterator.map { idx =>
+    val iter = (0 until rowIds.length).iterator.map { idx =>
       val rowId = rowIds(idx)
       val groupId = ((rowId + 1) / meta.rowCountInEachGroup).toInt
       val rowIdxInGroup = (rowId % meta.rowCountInEachGroup).toInt
@@ -172,6 +181,16 @@ private[spinach] case class SpinachDataFile(path: String, schema: StructType) ex
 
       row.moveToRow(rowIdxInGroup)
     }
+
+    new Iterator[InternalRow]() {
+      override def hasNext: Boolean = {
+        val hasNextRow = iter.hasNext
+        if (!hasNextRow) closeFile()
+        hasNextRow
+      }
+
+      override def next(): InternalRow = iter.next()
+    }
   }
 
   override def createDataFileHandle(conf: Configuration): SpinachDataFileHandle = {
@@ -182,6 +201,9 @@ private[spinach] case class SpinachDataFile(path: String, schema: StructType) ex
     new SpinachDataFileHandle().read(fs.open(p), fs.getFileStatus(p).getLen)
   }
 
+  /**
+   * close this SpinachDataFile and evict the corresponding data file handler out of memory
+   */
   def closeFile(): Unit = {
     // close fileHandler's finStream and evict file handler out of memory
     DataFileHandleCacheManager.evictDataFileHandler(this)
