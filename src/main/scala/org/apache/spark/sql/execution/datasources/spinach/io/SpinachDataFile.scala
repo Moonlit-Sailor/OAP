@@ -139,7 +139,7 @@ private[spinach] case class SpinachDataFile(path: String, schema: StructType) ex
     new Iterator[InternalRow]() {
       override def hasNext: Boolean = {
         val hasNextRow = iter.hasNext
-        if (!hasNextRow) closeFile()
+        if (!hasNextRow) close()
         hasNextRow
       }
 
@@ -185,7 +185,7 @@ private[spinach] case class SpinachDataFile(path: String, schema: StructType) ex
     new Iterator[InternalRow]() {
       override def hasNext: Boolean = {
         val hasNextRow = iter.hasNext
-        if (!hasNextRow) closeFile()
+        if (!hasNextRow) close()
         hasNextRow
       }
 
@@ -204,7 +204,7 @@ private[spinach] case class SpinachDataFile(path: String, schema: StructType) ex
   /**
    * close this SpinachDataFile and evict the corresponding data file handler out of memory
    */
-  def closeFile(): Unit = {
+  def close(): Unit = {
     // close fileHandler's finStream and evict file handler out of memory
     DataFileHandleCacheManager.evictDataFileHandler(this)
 
