@@ -17,8 +17,7 @@
 
 package org.apache.spark.sql.execution.datasources.oap.index
 
-import org.apache.hadoop.fs.Path
-
+import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.spark.internal.Logging
 import org.apache.spark.internal.io.FileCommitProtocol
 import org.apache.spark.sql._
@@ -475,5 +474,83 @@ case class OapShowIndex(table: TableIdentifier, relationName: String)
           Row(relationName, i.name, ei._2, schema(ei._1).name, "A", "BITMAP"))
       case t => sys.error(s"not support index type $t for index ${i.name}")
     })
+  }
+}
+
+case class OapCheckIndex(table: TableIdentifier, tableName: String)
+  extends RunnableCommand with Logging {
+  override val output: Seq[Attribute] = {
+    AttributeReference("Table", StringType, nullable = true)() ::
+      AttributeReference("Index Name", StringType, nullable = false)() ::
+      AttributeReference("Index Column(s)", StringType, nullable = false)() ::
+      AttributeReference("Index Type", StringType, nullable = false)() ::
+      AttributeReference("Data File", StringType, nullable = false)() :: Nil
+  }
+
+  def checkEachPartition(
+                          sparkSession: SparkSession,
+                          fs: FileSystem,
+                          dataSchema: StructType,
+                          partitionDir: PartitionDirectory): Seq[Row] = {
+    val parent = partitionDir.files.head.getPath.getParent
+    val existOld = fs.exists(new Path(parent, OapFileFormat.OAP_META_FILE))
+    if (existOld) {
+      val m = OapUtils.getMeta(sparkSession.sparkContext.hadoopConfiguration, parent)
+      assert(m.nonEmpty)
+      val fileMetas = m.get.fileMetas
+      val indexMetas = m.get.indexMetas
+      indexMetas.flatMap(index_meta => {
+        var indexColumns: String = null
+        var indexType: String = null
+        index_meta.indexType match {
+          case BTreeIndex(entries) =>
+            indexType = "BTree"
+            indexColumns = entries.map(e => dataSchema(e.ordinal).name).mkString(",")
+          case BitMapIndex(entries) =>
+            indexType = "Bitmap"
+            indexColumns = entries.map(dataSchema(_).name).mkString(",")
+        }
+        val dataFilesWithoutIndices = fileMetas.filter{
+          file_meta =>
+            val indexFile =
+              IndexUtils.indexFileFromDataFile(new Path(parent, file_meta.dataFileName),
+                index_meta.name, index_meta.time)
+            !fs.exists(indexFile)
+        }
+        dataFilesWithoutIndices.map(file_meta =>
+          Row(tableName, index_meta.name, indexColumns, indexType,
+            parent.toUri.getPath + "/" + file_meta.dataFileName))
+      })
+    } else {
+      Nil
+    }
+  }
+
+  override def run(sparkSession: SparkSession): Seq[Row] = {
+    val relation =
+      EliminateSubqueryAliases(sparkSession.sessionState.catalog.lookupRelation(table)) match {
+        case r: SimpleCatalogRelation => new FindDataSourceTable(sparkSession)(r)
+        case other => other
+      }
+
+    val (fileCatalog, dataSchema) = relation match {
+      case LogicalRelation(HadoopFsRelation(f, _, s, _, _, _), _, id) =>
+        (f, s)
+      case other =>
+        throw new OapException(s"We don't support index listing for ${other.simpleString}")
+    }
+
+    val partitionDirs = OapUtils.getPartitions(fileCatalog).filter(_.files.nonEmpty)
+    // TODO currently we ignore empty partitionDirs, so each partition may have different indexes,
+    // this may impact index updating. It may also fail index existence check. Should put index
+    // info at table level also.
+    val fs = if (partitionDirs.nonEmpty) {
+      partitionDirs.head.files.head.getPath
+        .getFileSystem(sparkSession.sparkContext.hadoopConfiguration)
+    } else {
+      null
+    }
+
+    partitionDirs.flatMap(checkEachPartition(sparkSession, fs, dataSchema, _))
   }
 }
