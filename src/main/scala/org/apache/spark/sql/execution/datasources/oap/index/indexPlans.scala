@@ -17,7 +17,10 @@
 
 package org.apache.spark.sql.execution.datasources.oap.index
 
+import scala.collection.mutable
+
 import org.apache.hadoop.fs.{FileSystem, Path}
+
 import org.apache.spark.internal.Logging
 import org.apache.spark.internal.io.FileCommitProtocol
 import org.apache.spark.sql._
@@ -487,11 +490,11 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
       AttributeReference("Data File", StringType, nullable = false)() :: Nil
   }
 
-  def checkEachPartition(
-                          sparkSession: SparkSession,
-                          fs: FileSystem,
-                          dataSchema: StructType,
-                          partitionDir: PartitionDirectory): Seq[Row] = {
+  def checkEachPartition(sparkSession: SparkSession,
+                         fs: FileSystem,
+                         dataSchema: StructType,
+                         partitionDir: PartitionDirectory): Seq[Row] = {
+    assert(null ne fs)
     val parent = partitionDir.files.head.getPath.getParent
     val existOld = fs.exists(new Path(parent, OapFileFormat.OAP_META_FILE))
     if (existOld) {
@@ -510,7 +513,7 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
             indexType = "Bitmap"
             indexColumns = entries.map(dataSchema(_).name).mkString(",")
         }
-        val dataFilesWithoutIndices = fileMetas.filter{
+        val dataFilesWithoutIndices = fileMetas.filter {
           file_meta =>
             val indexFile =
               IndexUtils.indexFileFromDataFile(new Path(parent, file_meta.dataFileName),
@@ -523,6 +526,56 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
       })
     } else {
       Nil
+    }
+  }
+
+  def analyzeIndexBetweenPartitions(sparkSession: SparkSession,
+                                    fs: FileSystem,
+                                    partitionDirs: Seq[PartitionDirectory]): Unit = {
+    assert(null ne fs)
+    val indicesMap = new mutable.HashMap[String, (IndexType, String)]()
+    val ambiguousIndices = new mutable.HashSet[String]()
+    partitionDirs.foreach{
+      pDir =>
+        val parent = pDir.files.head.getPath.getParent
+        val existOld = fs.exists(new Path(parent, OapFileFormat.OAP_META_FILE))
+        if (existOld) {
+          val m = OapUtils.getMeta(sparkSession.sparkContext.hadoopConfiguration, parent)
+          assert(m.nonEmpty)
+          m.get.indexMetas.foreach{
+            index_meta =>
+              if (!ambiguousIndices.contains(index_meta.name) &&
+                indicesMap.contains(index_meta.name)) {
+                val indexInfo = indicesMap(index_meta.name)
+                if (index_meta.indexType != indexInfo._1) {
+                  ambiguousIndices.add(index_meta.name)
+                }
+              }
+
+              val index_dirPair =
+                if (indicesMap.contains(index_meta.name)) {
+                  (indicesMap(index_meta.name)._1,
+                    indicesMap(index_meta.name)._2 + "\n" + parent.toUri.getPath)
+                } else {
+                  (index_meta.indexType, parent.toUri.getPath)
+                }
+
+              indicesMap.put(index_meta.name, index_dirPair)
+          }
+        }
+    }
+
+    if (ambiguousIndices.nonEmpty) {
+      val sb = new StringBuilder
+      ambiguousIndices.foreach(indexName => {
+        sb.append("index name:")
+        sb.append(indexName)
+        sb.append("\nin partition:\n")
+        sb.append(indicesMap(indexName)._2)
+        sb.append("\n")
+      })
+      throw new AnalysisException(
+        s"\nAmbiguous Index(different indices have the same name):\n${sb.toString()}")
     }
   }
 
@@ -540,10 +593,8 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
         throw new OapException(s"We don't support index listing for ${other.simpleString}")
     }
 
+    // ignore empty partition directory
     val partitionDirs = OapUtils.getPartitions(fileCatalog).filter(_.files.nonEmpty)
-    // TODO currently we ignore empty partitionDirs, so each partition may have different indexes,
-    // this may impact index updating. It may also fail index existence check. Should put index
-    // info at table level also.
     val fs = if (partitionDirs.nonEmpty) {
       partitionDirs.head.files.head.getPath
         .getFileSystem(sparkSession.sparkContext.hadoopConfiguration)
@@ -551,6 +602,11 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
       null
     }
 
+    if (partitionDirs.isEmpty || (null eq fs)) {
+      return Seq.empty
+    }
+
+    analyzeIndexBetweenPartitions(sparkSession, fs, partitionDirs)
     partitionDirs.flatMap(checkEachPartition(sparkSession, fs, dataSchema, _))
   }
 }
