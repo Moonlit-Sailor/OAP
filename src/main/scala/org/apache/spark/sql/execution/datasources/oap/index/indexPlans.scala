@@ -482,101 +482,123 @@ case class OapShowIndex(table: TableIdentifier, relationName: String)
 
 case class OapCheckIndex(table: TableIdentifier, tableName: String)
   extends RunnableCommand with Logging {
-  override val output: Seq[Attribute] = {
-    AttributeReference("Table", StringType, nullable = true)() ::
-      AttributeReference("Index Name", StringType, nullable = false)() ::
-      AttributeReference("Index Column(s)", StringType, nullable = false)() ::
-      AttributeReference("Index Type", StringType, nullable = false)() ::
-      AttributeReference("Data File", StringType, nullable = false)() :: Nil
-  }
+  override val output: Seq[Attribute] =
+    AttributeReference("Analysis Result", StringType, nullable = false)() :: Nil
+
 
   def checkEachPartition(sparkSession: SparkSession,
                          fs: FileSystem,
                          dataSchema: StructType,
-                         partitionDir: PartitionDirectory): Seq[Row] = {
-    assert(null ne fs)
-    val parent = partitionDir.files.head.getPath.getParent
-    val existOld = fs.exists(new Path(parent, OapFileFormat.OAP_META_FILE))
-    if (existOld) {
-      val m = OapUtils.getMeta(sparkSession.sparkContext.hadoopConfiguration, parent)
-      assert(m.nonEmpty)
-      val fileMetas = m.get.fileMetas
-      val indexMetas = m.get.indexMetas
-      indexMetas.flatMap(index_meta => {
-        var indexColumns: String = null
-        var indexType: String = null
-        index_meta.indexType match {
-          case BTreeIndex(entries) =>
-            indexType = "BTree"
-            indexColumns = entries.map(e => dataSchema(e.ordinal).name).mkString(",")
-          case BitMapIndex(entries) =>
-            indexType = "Bitmap"
-            indexColumns = entries.map(dataSchema(_).name).mkString(",")
-        }
-        val dataFilesWithoutIndices = fileMetas.filter {
-          file_meta =>
-            val indexFile =
-              IndexUtils.indexFileFromDataFile(new Path(parent, file_meta.dataFileName),
-                index_meta.name, index_meta.time)
-            !fs.exists(indexFile)
-        }
-        dataFilesWithoutIndices.map(file_meta =>
-          Row(tableName, index_meta.name, indexColumns, indexType,
-            parent.toUri.getPath + "/" + file_meta.dataFileName))
-      })
-    } else {
-      Nil
-    }
+                         partitionDir: Path): Seq[Row] = {
+    require(null ne fs, "file system should not be null!")
+    val m = OapUtils.getMeta(sparkSession.sparkContext.hadoopConfiguration, partitionDir)
+    assert(m.nonEmpty)
+    val fileMetas = m.get.fileMetas
+    val indexMetas = m.get.indexMetas
+    checkDataFileInEachPartition(fs, dataSchema, fileMetas, partitionDir) ++
+      checkIndexInEachPartition(fs, dataSchema, fileMetas, indexMetas, partitionDir)
+  }
+
+  def checkDataFileInEachPartition(fs: FileSystem,
+                                   dataSchema: StructType,
+                                   fileMetas: Seq[FileMeta],
+                                   partitionPath: Path): Seq[Row] = {
+    require(null ne fs, "file system should not be null!")
+    fileMetas.filter(file_meta => !fs.exists(new Path(partitionPath, file_meta.dataFileName)))
+      .map(file_meta =>
+        Row(s"data file: ${partitionPath.toUri.getPath}/${file_meta.dataFileName} not found!"))
+
+  }
+
+  def checkIndexInEachPartition(fs: FileSystem,
+                                dataSchema: StructType,
+                                fileMetas: Seq[FileMeta],
+                                indexMetas: Seq[IndexMeta],
+                                partitionPath: Path): Seq[Row] = {
+    require(null ne fs, "file system should not be null!")
+    indexMetas.flatMap(index_meta => {
+      var indexColumns: String = null
+      var indexType: String = null
+      index_meta.indexType match {
+        case BTreeIndex(entries) =>
+          indexType = "BTree"
+          indexColumns = entries.map(e => dataSchema(e.ordinal).name).mkString(",")
+        case BitMapIndex(entries) =>
+          indexType = "Bitmap"
+          indexColumns = entries.map(dataSchema(_).name).mkString(",")
+        case other => throw new OapException(s"We don't support this type of index: $other")
+      }
+      val dataFilesWithoutIndices = fileMetas.filter {
+        file_meta =>
+          val indexFile =
+            IndexUtils.indexFileFromDataFile(new Path(partitionPath, file_meta.dataFileName),
+              index_meta.name, index_meta.time)
+          !fs.exists(indexFile)
+      }
+      dataFilesWithoutIndices.map(file_meta =>
+        Row(s"""Missing index:${index_meta.name},
+                |indexColumn(s): $indexColumns, indexType: $indexType
+                |for File: ${partitionPath.toUri.getPath}/${file_meta.dataFileName}
+                |of table: $tableName""".stripMargin))
+    })
   }
 
   def analyzeIndexBetweenPartitions(sparkSession: SparkSession,
                                     fs: FileSystem,
-                                    partitionDirs: Seq[PartitionDirectory]): Unit = {
-    assert(null ne fs)
+                                    partitionDirs: Seq[Path]): Unit = {
+    require(null ne fs, "file system should not be null!")
     val indicesMap = new mutable.HashMap[String, (IndexType, String)]()
     val ambiguousIndices = new mutable.HashSet[String]()
-    partitionDirs.foreach{
-      pDir =>
-        val parent = pDir.files.head.getPath.getParent
-        val existOld = fs.exists(new Path(parent, OapFileFormat.OAP_META_FILE))
-        if (existOld) {
-          val m = OapUtils.getMeta(sparkSession.sparkContext.hadoopConfiguration, parent)
-          assert(m.nonEmpty)
-          m.get.indexMetas.foreach{
-            index_meta =>
-              if (!ambiguousIndices.contains(index_meta.name) &&
-                indicesMap.contains(index_meta.name)) {
-                val indexInfo = indicesMap(index_meta.name)
-                if (index_meta.indexType != indexInfo._1) {
-                  ambiguousIndices.add(index_meta.name)
-                }
+    partitionDirs.foreach {
+      partitionDir =>
+        val m = OapUtils.getMeta(sparkSession.sparkContext.hadoopConfiguration, partitionDir)
+        assert(m.nonEmpty)
+        m.get.indexMetas.foreach {
+          index_meta =>
+            if (!ambiguousIndices.contains(index_meta.name) &&
+              indicesMap.contains(index_meta.name)) {
+              val indexInfo = indicesMap(index_meta.name)
+              if (index_meta.indexType != indexInfo._1) {
+                ambiguousIndices.add(index_meta.name)
+              }
+            }
+
+            val index_dirPair =
+              if (indicesMap.contains(index_meta.name)) {
+                (indicesMap(index_meta.name)._1,
+                  indicesMap(index_meta.name)._2 + "\n" + partitionDir.toUri.getPath)
+              } else {
+                (index_meta.indexType, partitionDir.toUri.getPath)
               }
 
-              val index_dirPair =
-                if (indicesMap.contains(index_meta.name)) {
-                  (indicesMap(index_meta.name)._1,
-                    indicesMap(index_meta.name)._2 + "\n" + parent.toUri.getPath)
-                } else {
-                  (index_meta.indexType, parent.toUri.getPath)
-                }
-
-              indicesMap.put(index_meta.name, index_dirPair)
-          }
+            indicesMap.put(index_meta.name, index_dirPair)
         }
+
     }
 
     if (ambiguousIndices.nonEmpty) {
       val sb = new StringBuilder
       ambiguousIndices.foreach(indexName => {
+        sb.append("Ambiguous Index(different indices have the same name):\n")
         sb.append("index name:")
         sb.append(indexName)
         sb.append("\nin partition:\n")
         sb.append(indicesMap(indexName)._2)
         sb.append("\n")
       })
-      throw new AnalysisException(
-        s"\nAmbiguous Index(different indices have the same name):\n${sb.toString()}")
+      throw new AnalysisException(s"\n${sb.toString()}")
     }
+  }
+
+  def checkOapMetaFile(fs: FileSystem,
+                       partitionDirs: Seq[PartitionDirectory]): (Seq[Path], Seq[Row]) = {
+    require(null ne fs, "file system should not be null!")
+    val (partWithMeta, partWithoutMeta) =
+      partitionDirs.map(_.files.head.getPath.getParent).partition(partitionDir =>
+        fs.exists(new Path(partitionDir, OapFileFormat.OAP_META_FILE)))
+    (partWithMeta, partWithoutMeta.map(partitionPath =>
+      Row(s"Meta file not found in partition: ${partitionPath.toUri.getPath}"))
+      )
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
@@ -606,7 +628,9 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
       return Seq.empty
     }
 
-    analyzeIndexBetweenPartitions(sparkSession, fs, partitionDirs)
-    partitionDirs.flatMap(checkEachPartition(sparkSession, fs, dataSchema, _))
+    val (partitionWithMeta, checkMetaResult) = checkOapMetaFile(fs, partitionDirs)
+    analyzeIndexBetweenPartitions(sparkSession, fs, partitionWithMeta)
+    checkMetaResult ++
+      partitionWithMeta.flatMap(checkEachPartition(sparkSession, fs, dataSchema, _))
   }
 }
