@@ -503,16 +503,18 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
   extends RunnableCommand with Logging {
   override val output: Seq[Attribute] =
     AttributeReference("Analysis Result", StringType, nullable = false)() :: Nil
-  def checkOapMetaFile(fs: FileSystem,
-                       partitionDirs: Seq[PartitionDirectory]): (Seq[Path], Seq[Row]) = {
-    require(null ne fs, "file system should not be null!")
-    val (partWithMeta, partWithoutMeta) =
-      partitionDirs.map(_.files.head.getPath.getParent)
-        .partition(partitionDir => fs.exists(new Path(partitionDir, OapFileFormat.OAP_META_FILE)))
 
-    (partWithMeta,
-      partWithoutMeta.map(partitionPath =>
-        Row(s"Meta file not found in partition: ${partitionPath.toUri.getPath}")))
+  private def checkOapMetaFile(fs: FileSystem,
+                               partitionDirs: Seq[PartitionDirectory]): (Seq[Path], Seq[Path]) = {
+    require(null ne fs, "file system should not be null!")
+
+    partitionDirs.map(_.files.head.getPath.getParent)
+      .partition(partitionDir => fs.exists(new Path(partitionDir, OapFileFormat.OAP_META_FILE)))
+  }
+
+  private def processPartitionsWithNoMeta(partitionDirs: Seq[Path]): Seq[Row] = {
+    partitionDirs.map(partitionPath =>
+      Row(s"Meta file not found in partition: ${partitionPath.toUri.getPath}"))
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
@@ -526,7 +528,7 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
       case LogicalRelation(HadoopFsRelation(f, _, s, _, _, _), _, id) =>
         (f, s)
       case other =>
-        throw new OapException(s"We don't support index listing for ${other.simpleString}")
+        throw new OapException(s"We don't support index checking for ${other.simpleString}")
     }
 
     // ignore empty partition directory
@@ -542,7 +544,7 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
       return Seq.empty
     }
 
-    val (partitionWithMeta, checkMetaResult) = checkOapMetaFile(fs, partitionDirs)
-    checkMetaResult
+    val (partitionWithMeta, partitionWithNoMeta) = checkOapMetaFile(fs, partitionDirs)
+    processPartitionsWithNoMeta(partitionWithNoMeta)
   }
 }
