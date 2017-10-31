@@ -21,10 +21,11 @@ import java.io.File
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
+import org.scalatest.BeforeAndAfterEach
+
+import org.apache.spark.sql.{QueryTest, Row, SaveMode}
 import org.apache.spark.sql.execution.datasources.oap.index.IndexUtils
 import org.apache.spark.sql.execution.datasources.oap.utils.OapUtils
-import org.scalatest.BeforeAndAfterEach
-import org.apache.spark.sql.{QueryTest, Row, SaveMode}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.test.SharedSQLContext
 import org.apache.spark.util.Utils
@@ -268,7 +269,7 @@ class OapDDLSuite extends QueryTest with SharedSQLContext with BeforeAndAfterEac
         |SELECT key from t where value == 104
       """.stripMargin)
 
-    // Create a B+ tree index on Column("key")
+    // Create a B+ tree index on Column("a")
     sql("create oindex idx1 on oap_partition_table(a)")
 
     checkAnswer(sql("check oindex on oap_partition_table"), Nil)
