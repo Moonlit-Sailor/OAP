@@ -102,9 +102,9 @@ object OapUtils extends Logging {
    * @param partitionSpec the specification of the partitions
    * @return all valid files grouped into partition(s) on the disk
    */
-  def getPartitionsRefreshed(fileIndex: FileIndex,
-                             partitionSpec: Option[TablePartitionSpec] = None)
-  : Seq[PartitionDirectory] = {
+  def getPartitionsRefreshed(
+      fileIndex: FileIndex,
+      partitionSpec: Option[TablePartitionSpec] = None): Seq[PartitionDirectory] = {
     fileIndex.refresh()
     getPartitions(fileIndex, partitionSpec)
   }
