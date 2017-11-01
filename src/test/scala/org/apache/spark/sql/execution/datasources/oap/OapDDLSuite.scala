@@ -67,7 +67,7 @@ class OapDDLSuite extends QueryTest with SharedSQLContext with BeforeAndAfterEac
   test("check existent meta file") {
     val data: Seq[(Int, String)] = (1 to 300).map { i => (i, s"this is test $i") }
     val df = data.toDF("key", "value")
-    val path = Utils.createTempDir("/tmp/").toString
+    val path = Utils.createTempDir().toString
     df.write.format("oap").mode(SaveMode.Overwrite).save(path)
     val oapDf = spark.read.format("oap").load(path)
     oapDf.createOrReplaceTempView("t")
@@ -77,7 +77,7 @@ class OapDDLSuite extends QueryTest with SharedSQLContext with BeforeAndAfterEac
   test("check nonexistent meta file") {
     val data: Seq[(Int, String)] = (1 to 300).map { i => (i, s"this is test $i") }
     val df = data.toDF("key", "value")
-    val path = Utils.createTempDir("/tmp/").toString
+    val path = Utils.createTempDir().toString
     df.write.format("oap").mode(SaveMode.Overwrite).save(path)
     val oapDf = spark.read.format("oap").load(path)
     oapDf.createOrReplaceTempView("t")
@@ -133,7 +133,7 @@ class OapDDLSuite extends QueryTest with SharedSQLContext with BeforeAndAfterEac
   test("check index on table: Missing data file") {
     val data = sparkContext.parallelize(1 to 300, 3).map { i => (i, s"this is test $i") }
     val df = data.toDF("key", "value")
-    val path = Utils.createTempDir("/tmp/").toString
+    val path = Utils.createTempDir().toString
     df.write.format("oap").mode(SaveMode.Overwrite).save(path)
     val oapDf = spark.read.format("oap").load(path)
     oapDf.createOrReplaceTempView("t")
@@ -159,7 +159,7 @@ class OapDDLSuite extends QueryTest with SharedSQLContext with BeforeAndAfterEac
   test("check index on table: Missing index file") {
     val data: Seq[(Int, String)] = (1 to 300).map { i => (i, s"this is test $i") }
     val df = data.toDF("key", "value")
-    val path = Utils.createTempDir("/tmp/").toString
+    val path = Utils.createTempDir().toString
     df.write.format("oap").mode(SaveMode.Overwrite).save(path)
     val oapDf = spark.read.format("oap").load(path)
     oapDf.createOrReplaceTempView("t")
@@ -183,10 +183,11 @@ class OapDDLSuite extends QueryTest with SharedSQLContext with BeforeAndAfterEac
 
     // Check again
     checkAnswer(sql("check oindex on t"),
-      Row(s"""Missing index:idx1,
-              |indexColumn(s): key, indexType: BTree
-              |for Data File: $path/$dataFileName
-              |of table: t""".stripMargin))
+      Row(
+        s"""Missing index:idx1,
+          |indexColumn(s): key, indexType: BTree
+          |for Data File: $path/$dataFileName
+          |of table: t""".stripMargin))
   }
 
   test("check index on partitioned table") {
@@ -290,10 +291,11 @@ class OapDDLSuite extends QueryTest with SharedSQLContext with BeforeAndAfterEac
 
     // Check again
     checkAnswer(sql("check oindex on oap_partition_table"),
-      Row(s"""Missing index:idx1,
-              |indexColumn(s): a, indexType: BTree
-              |for Data File: ${partitionPath.toUri.getPath}/$dataFileName
-              |of table: oap_partition_table""".stripMargin))
+      Row(
+        s"""Missing index:idx1,
+          |indexColumn(s): a, indexType: BTree
+          |for Data File: ${partitionPath.toUri.getPath}/$dataFileName
+          |of table: oap_partition_table""".stripMargin))
   }
 
   test("write index for table read in from DS api") {

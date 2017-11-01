@@ -504,8 +504,9 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
   override val output: Seq[Attribute] =
     AttributeReference("Analysis Result", StringType, nullable = false)() :: Nil
 
-  private def checkOapMetaFile(fs: FileSystem,
-                               partitionDirs: Seq[PartitionDirectory]): (Seq[Path], Seq[Path]) = {
+  private def checkOapMetaFile(
+      fs: FileSystem,
+      partitionDirs: Seq[PartitionDirectory]): (Seq[Path], Seq[Path]) = {
     require(null ne fs, "file system should not be null!")
 
     partitionDirs.map(_.files.head.getPath.getParent)
@@ -517,10 +518,11 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
       Row(s"Meta file not found in partition: ${partitionPath.toUri.getPath}"))
   }
 
-  private def checkEachPartition(sparkSession: SparkSession,
-                                 fs: FileSystem,
-                                 dataSchema: StructType,
-                                 partitionDir: Path): Seq[Row] = {
+  private def checkEachPartition(
+      sparkSession: SparkSession,
+      fs: FileSystem,
+      dataSchema: StructType,
+      partitionDir: Path): Seq[Row] = {
     require(null ne fs, "file system should not be null!")
     val m = OapUtils.getMeta(sparkSession.sparkContext.hadoopConfiguration, partitionDir)
     assert(m.nonEmpty)
@@ -530,21 +532,23 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
       checkIndexInEachPartition(fs, dataSchema, fileMetas, indexMetas, partitionDir)
   }
 
-  private def checkDataFileInEachPartition(fs: FileSystem,
-                                           dataSchema: StructType,
-                                           fileMetas: Seq[FileMeta],
-                                           partitionPath: Path): Seq[Row] = {
+  private def checkDataFileInEachPartition(
+      fs: FileSystem,
+      dataSchema: StructType,
+      fileMetas: Seq[FileMeta],
+      partitionPath: Path): Seq[Row] = {
     require(null ne fs, "file system should not be null!")
-    fileMetas.filter(file_meta => !fs.exists(new Path(partitionPath, file_meta.dataFileName)))
+    fileMetas.filterNot(file_meta => fs.exists(new Path(partitionPath, file_meta.dataFileName)))
       .map(file_meta =>
         Row(s"Data file: ${partitionPath.toUri.getPath}/${file_meta.dataFileName} not found!"))
   }
 
-  private def checkIndexInEachPartition(fs: FileSystem,
-                                        dataSchema: StructType,
-                                        fileMetas: Seq[FileMeta],
-                                        indexMetas: Seq[IndexMeta],
-                                        partitionPath: Path): Seq[Row] = {
+  private def checkIndexInEachPartition(
+      fs: FileSystem,
+      dataSchema: StructType,
+      fileMetas: Seq[FileMeta],
+      indexMetas: Seq[IndexMeta],
+      partitionPath: Path): Seq[Row] = {
     require(null ne fs, "file system should not be null!")
     indexMetas.flatMap(index_meta => {
       var indexColumns: String = null
@@ -566,10 +570,11 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
           !fs.exists(indexFile)
       }
       dataFilesWithoutIndices.map(file_meta =>
-        Row(s"""Missing index:${index_meta.name},
-                |indexColumn(s): $indexColumns, indexType: $indexType
-                |for Data File: ${partitionPath.toUri.getPath}/${file_meta.dataFileName}
-                |of table: $tableName""".stripMargin))
+        Row(
+          s"""Missing index:${index_meta.name},
+            |indexColumn(s): $indexColumns, indexType: $indexType
+            |for Data File: ${partitionPath.toUri.getPath}/${file_meta.dataFileName}
+            |of table: $tableName""".stripMargin))
     })
   }
 
