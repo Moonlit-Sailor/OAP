@@ -551,15 +551,15 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
       partitionPath: Path): Seq[Row] = {
     require(null ne fs, "file system should not be null!")
     indexMetas.flatMap(index_meta => {
-      var indexColumns: String = null
-      var indexType: String = null
-      index_meta.indexType match {
+      val (indexType, indexColumns) = index_meta.indexType match {
         case BTreeIndex(entries) =>
-          indexType = "BTree"
-          indexColumns = entries.map(e => dataSchema(e.ordinal).name).mkString(",")
+          ("BTree", entries.map(e => dataSchema(e.ordinal).name).mkString(","))
         case BitMapIndex(entries) =>
-          indexType = "Bitmap"
-          indexColumns = entries.map(dataSchema(_).name).mkString(",")
+          ("Bitmap", entries.map(dataSchema(_).name).mkString(","))
+        case HashIndex(entries) =>
+          ("Bitmap", entries.map(dataSchema(_).name).mkString(","))
+        case TrieIndex(entry) =>
+          ("Trie", dataSchema(entry).name)
         case other => throw new OapException(s"We don't support this type of index: $other")
       }
       val dataFilesWithoutIndices = fileMetas.filter {
@@ -592,12 +592,8 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
         throw new OapException(s"We don't support index checking for ${other.simpleString}")
     }
 
-    // ********** workaround for OapUtils.getPartitions method ********
-    fileCatalog.refresh()
-
-
     // ignore empty partition directory
-    val partitionDirs = OapUtils.getPartitions(fileCatalog).filter(_.files.nonEmpty)
+    val partitionDirs = OapUtils.getPartitionsRefreshed(fileCatalog).filter(_.files.nonEmpty)
     val fs = if (partitionDirs.nonEmpty) {
       partitionDirs.head.files.head.getPath
         .getFileSystem(sparkSession.sparkContext.hadoopConfiguration)

@@ -227,7 +227,7 @@ class OapDDLSuite extends QueryTest with SharedSQLContext with BeforeAndAfterEac
       """
         |INSERT INTO TABLE oap_partition_table
         |partition (b=2, c='c2')
-        |SELECT key from t where value == 104
+        |SELECT key from t where value >= 104
       """.stripMargin)
     sql("create oindex idx1 on oap_partition_table(a)")
 
@@ -238,9 +238,9 @@ class OapDDLSuite extends QueryTest with SharedSQLContext with BeforeAndAfterEac
     val metaOpt = OapUtils.getMeta(sparkContext.hadoopConfiguration, partitionPath)
     assert(metaOpt.nonEmpty)
     assert(metaOpt.get.fileMetas.nonEmpty)
-    // parquet's dataFileName contains path
+
     val dataFileName = metaOpt.get.fileMetas.head.dataFileName
-    Utils.deleteRecursively(new File(new Path(dataFileName).toUri.getPath))
+    Utils.deleteRecursively(new File(new Path(partitionPath, dataFileName).toUri.getPath))
 
     val checkResult: Seq[Row] =
       if (metaOpt.get.fileMetas.length > 1) {
@@ -282,11 +282,11 @@ class OapDDLSuite extends QueryTest with SharedSQLContext with BeforeAndAfterEac
     assert(metaOpt.get.fileMetas.nonEmpty)
     assert(metaOpt.get.indexMetas.nonEmpty)
     val indexMeta = metaOpt.get.indexMetas.head
-    // parquet's dataFileName contains path
+
     val dataFileName = metaOpt.get.fileMetas.head.dataFileName
     val indexFileName =
-      IndexUtils.indexFileFromDataFile(new Path(dataFileName),
-        indexMeta.name, indexMeta.time).toUri.getPath
+      IndexUtils.indexFileFromDataFile(
+        new Path(partitionPath, dataFileName), indexMeta.name, indexMeta.time).toUri.getPath
     Utils.deleteRecursively(new File(indexFileName))
 
     // Check again
