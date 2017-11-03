@@ -612,12 +612,12 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
     }
 
     if (partitionDirs.isEmpty || (null eq fs)) {
-      return Seq.empty
+      Seq.empty
+    } else {
+      val (partitionWithMeta, partitionWithNoMeta) = checkOapMetaFile(fs, partitionDirs)
+      processPartitionsWithNoMeta(partitionWithNoMeta) ++
+        partitionWithMeta.flatMap(checkEachPartition(sparkSession, fs, dataSchema, _))
     }
-
-    val (partitionWithMeta, partitionWithNoMeta) = checkOapMetaFile(fs, partitionDirs)
-    processPartitionsWithNoMeta(partitionWithNoMeta) ++
-      partitionWithMeta.flatMap(checkEachPartition(sparkSession, fs, dataSchema, _))
 
   }
 }

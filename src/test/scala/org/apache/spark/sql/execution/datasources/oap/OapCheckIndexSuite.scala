@@ -19,7 +19,6 @@ package org.apache.spark.sql.execution.datasources.oap
 
 import java.io.File
 
-import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.scalatest.BeforeAndAfterEach
 
