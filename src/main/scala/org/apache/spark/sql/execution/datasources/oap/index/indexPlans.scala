@@ -499,6 +499,16 @@ case class OapShowIndex(table: TableIdentifier, relationName: String)
   }
 }
 
+/**
+ * Check integrity of data and indices for specified table
+ * Invoked by `CHECK OINDEX ON table`
+ * Currently it has the following features:
+ * 1. check existence of oap meta file
+ * 2. check integrity of each partition directory of table for both data files
+ *    and index files according to meta
+ * @param table TableIdentifier of the specified table
+ * @param tableName table name of the specified table
+ */
 case class OapCheckIndex(table: TableIdentifier, tableName: String)
   extends RunnableCommand with Logging {
   override val output: Seq[Attribute] =
