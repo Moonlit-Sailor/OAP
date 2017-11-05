@@ -588,6 +588,54 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
     })
   }
 
+  private def analyzeIndexBetweenPartitions(
+      sparkSession: SparkSession,
+      fs: FileSystem,
+      partitionDirs: Seq[Path]): Unit = {
+    require(null ne fs, "file system should not be null!")
+    val indicesMap = new mutable.HashMap[String, (IndexType, String)]()
+    val ambiguousIndices = new mutable.HashSet[String]()
+    partitionDirs.foreach {
+      partitionDir =>
+        val m = OapUtils.getMeta(sparkSession.sparkContext.hadoopConfiguration, partitionDir)
+        assert(m.nonEmpty)
+        m.get.indexMetas.foreach {
+          index_meta =>
+            if (!ambiguousIndices.contains(index_meta.name) &&
+              indicesMap.contains(index_meta.name)) {
+              val indexInfo = indicesMap(index_meta.name)
+              if (index_meta.indexType != indexInfo._1) {
+                ambiguousIndices.add(index_meta.name)
+              }
+            }
+
+            val index_dirPair =
+              if (indicesMap.contains(index_meta.name)) {
+                (indicesMap(index_meta.name)._1,
+                  indicesMap(index_meta.name)._2 + "\n" + partitionDir.toUri.getPath)
+              } else {
+                (index_meta.indexType, partitionDir.toUri.getPath)
+              }
+
+            indicesMap.put(index_meta.name, index_dirPair)
+        }
+
+    }
+
+    if (ambiguousIndices.nonEmpty) {
+      val sb = new StringBuilder
+      ambiguousIndices.foreach(indexName => {
+        sb.append("Ambiguous Index(different indices have the same name):\n")
+        sb.append("index name:")
+        sb.append(indexName)
+        sb.append("\nin partition:\n")
+        sb.append(indicesMap(indexName)._2)
+        sb.append("\n")
+      })
+      throw new AnalysisException(s"\n${sb.toString()}")
+    }
+  }
+
   override def run(sparkSession: SparkSession): Seq[Row] = {
     val relation =
       EliminateSubqueryAliases(sparkSession.sessionState.catalog.lookupRelation(table)) match {
@@ -615,6 +663,7 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
       Seq.empty
     } else {
       val (partitionWithMeta, partitionWithNoMeta) = checkOapMetaFile(fs, partitionDirs)
+      analyzeIndexBetweenPartitions(sparkSession, fs, partitionWithMeta)
       processPartitionsWithNoMeta(partitionWithNoMeta) ++
         partitionWithMeta.flatMap(checkEachPartition(sparkSession, fs, dataSchema, _))
     }
