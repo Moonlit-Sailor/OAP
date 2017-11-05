@@ -324,11 +324,11 @@ class OapCheckIndexSuite extends QueryTest with SharedSQLContext with BeforeAndA
 
     sql("create oindex idx1 on oap_partition_table(a) using bitmap partition(b=2, c='c2')")
 
-    try {
+    val exception = intercept[AnalysisException]{
       sql("check oindex on oap_partition_table")
-    } catch {
-      case ex: AnalysisException =>
-        assert(ex.message.startsWith("\nAmbiguous Index(different indices have the same name):"))
     }
+    assert(exception.message.startsWith(
+      "\nAmbiguous Index(different indices have the same name):\nindex name:idx1"))
+
   }
 }
