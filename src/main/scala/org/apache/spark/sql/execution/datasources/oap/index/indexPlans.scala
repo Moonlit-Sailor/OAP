@@ -572,12 +572,11 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
           ("Trie", dataSchema(entry).name)
         case other => throw new OapException(s"We don't support this type of index: $other")
       }
-      val dataFilesWithoutIndices = fileMetas.filter {
-        file_meta =>
-          val indexFile =
-            IndexUtils.indexFileFromDataFile(new Path(partitionPath, file_meta.dataFileName),
-              index_meta.name, index_meta.time)
-          !fs.exists(indexFile)
+      val dataFilesWithoutIndices = fileMetas.filter { file_meta =>
+        val indexFile =
+          IndexUtils.indexFileFromDataFile(new Path(partitionPath, file_meta.dataFileName),
+            index_meta.name, index_meta.time)
+        !fs.exists(indexFile)
       }
       dataFilesWithoutIndices.map(file_meta =>
         Row(
@@ -595,22 +594,20 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
     require(null ne fs, "file system should not be null!")
     val indicesMap = new mutable.HashMap[String, (IndexType, Seq[Path])]()
     val ambiguousIndices = new mutable.HashSet[String]()
-    partitionDirs.foreach {
-      partitionDir =>
-        val m = OapUtils.getMeta(sparkSession.sparkContext.hadoopConfiguration, partitionDir)
-        assert(m.nonEmpty)
-        m.get.indexMetas.foreach {
-          index_meta =>
-            val (idxType, idxPaths) =
-              indicesMap.getOrElse(index_meta.name, (index_meta.indexType, Seq.empty[Path]))
+    partitionDirs.foreach { partitionDir =>
+      val m = OapUtils.getMeta(sparkSession.sparkContext.hadoopConfiguration, partitionDir)
+      assert(m.nonEmpty)
+      m.get.indexMetas.foreach { index_meta =>
+        val (idxType, idxPaths) =
+          indicesMap.getOrElse(index_meta.name, (index_meta.indexType, Seq.empty[Path]))
 
-            if (!ambiguousIndices.contains(index_meta.name) &&
-              indicesMap.contains(index_meta.name) && index_meta.indexType != idxType) {
-              ambiguousIndices.add(index_meta.name)
-            }
-
-            indicesMap.put(index_meta.name, (idxType, idxPaths :+ partitionDir))
+        if (!ambiguousIndices.contains(index_meta.name) &&
+          indicesMap.contains(index_meta.name) && index_meta.indexType != idxType) {
+          ambiguousIndices.add(index_meta.name)
         }
+
+        indicesMap.put(index_meta.name, (idxType, idxPaths :+ partitionDir))
+      }
     }
 
     if (ambiguousIndices.nonEmpty) {
