@@ -593,7 +593,7 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
       fs: FileSystem,
       partitionDirs: Seq[Path]): Unit = {
     require(null ne fs, "file system should not be null!")
-    val indicesMap = new mutable.HashMap[String, (IndexType, String)]()
+    val indicesMap = new mutable.HashMap[String, (IndexType, Seq[Path])]()
     val ambiguousIndices = new mutable.HashSet[String]()
     partitionDirs.foreach {
       partitionDir =>
@@ -601,25 +601,16 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
         assert(m.nonEmpty)
         m.get.indexMetas.foreach {
           index_meta =>
+            val (idxType, idxPaths) =
+              indicesMap.getOrElse(index_meta.name, (index_meta.indexType, Seq.empty[Path]))
+
             if (!ambiguousIndices.contains(index_meta.name) &&
-              indicesMap.contains(index_meta.name)) {
-              val indexInfo = indicesMap(index_meta.name)
-              if (index_meta.indexType != indexInfo._1) {
-                ambiguousIndices.add(index_meta.name)
-              }
+              indicesMap.contains(index_meta.name) && index_meta.indexType != idxType) {
+              ambiguousIndices.add(index_meta.name)
             }
 
-            val index_dirPair =
-              if (indicesMap.contains(index_meta.name)) {
-                (indicesMap(index_meta.name)._1,
-                  indicesMap(index_meta.name)._2 + "\n" + partitionDir.toUri.getPath)
-              } else {
-                (index_meta.indexType, partitionDir.toUri.getPath)
-              }
-
-            indicesMap.put(index_meta.name, index_dirPair)
+            indicesMap.put(index_meta.name, (idxType, idxPaths :+ partitionDir))
         }
-
     }
 
     if (ambiguousIndices.nonEmpty) {
@@ -629,7 +620,7 @@ case class OapCheckIndex(table: TableIdentifier, tableName: String)
         sb.append("index name:")
         sb.append(indexName)
         sb.append("\nin partition:\n")
-        sb.append(indicesMap(indexName)._2)
+        indicesMap(indexName)._2.map(_.toUri.getPath).addString(sb, "\n")
         sb.append("\n")
       })
       throw new AnalysisException(s"\n${sb.toString()}")
