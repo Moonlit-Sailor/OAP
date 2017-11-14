@@ -642,9 +642,6 @@ case class OapCheckIndex(
         throw new OapException(s"We don't support index checking for ${other.simpleString}")
     }
 
-    // ignore empty partition directory
-//    val partitionDirs =
-//      OapUtils.getPartitionsRefreshed(fileCatalog, partitionSpec).filter(_.files.nonEmpty)
     val rootPaths = fileCatalog.rootPaths
     val fs = if (rootPaths.nonEmpty) {
       rootPaths.head.getFileSystem(sparkSession.sparkContext.hadoopConfiguration)
@@ -657,10 +654,9 @@ case class OapCheckIndex(
     } else {
       val partitionDirs =
         OapUtils.getPartitionPaths(rootPaths, fs, fileCatalog.partitionSchema, partitionSpec)
-      val (partitionWithMeta, partitionWithNoMeta) = checkOapMetaFile(fs, partitionDirs)
-      analyzeIndexBetweenPartitions(sparkSession, fs, partitionWithMeta)
-      processPartitionsWithNoMeta(partitionWithNoMeta) ++
-        partitionWithMeta.flatMap(checkEachPartition(sparkSession, fs, dataSchema, _))
+
+      analyzeIndexBetweenPartitions(sparkSession, fs, partitionDirs)
+      partitionDirs.flatMap(checkEachPartition(sparkSession, fs, dataSchema, _))
     }
 
   }

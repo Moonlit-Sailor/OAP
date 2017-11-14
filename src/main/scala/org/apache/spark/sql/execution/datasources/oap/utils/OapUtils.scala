@@ -82,14 +82,14 @@ object OapUtils extends Logging {
   }
 
   /**
-   * Get partition directory path(s),
+   * Get partition directory path(s) which has oap meta,
    * return directories' paths if data is partitioned, or a single path if data is unpartitioned.
    * @param rootPaths the root paths of [[FileIndex]] of the relation
    * @param fs File system
    * @param partitionSchema partitioned column(s) schema of the relation
    * @param partitionSpec Schema of the partitioning columns,
    *                      or the empty schema if the table is not partitioned
-   * @return all valid path(s) of directories pertain to the table
+   * @return all valid path(s) of directories containing meta pertain to the table
    */
   def getPartitionPaths(
       rootPaths: Seq[Path],
