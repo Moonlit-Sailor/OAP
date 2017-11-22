@@ -82,14 +82,14 @@ object OapUtils extends Logging {
   }
 
   /**
-   * Get partition directory path(s) which has oap meta,
+   * Get partition directory path(s) which has oap meta or data files,
    * return directories' paths if data is partitioned, or a single path if data is unpartitioned.
    * @param rootPaths the root paths of [[FileIndex]] of the relation
    * @param fs File system
    * @param partitionSchema partitioned column(s) schema of the relation
    * @param partitionSpec Schema of the partitioning columns,
    *                      or the empty schema if the table is not partitioned
-   * @return all valid path(s) of directories containing meta pertain to the table
+   * @return all valid path(s) of directories containing meta or data files pertain to the table
    */
   def getPartitionPaths(
       rootPaths: Seq[Path],
@@ -131,16 +131,32 @@ object OapUtils extends Logging {
   }
 
   /**
-   * Scan and Get the table's all directory path(s) which has an oap meta file
+   * Scan and Get the table's all directory path(s) which has oap meta file or data files
    * @param directoryPaths the input path(s) to search
    * @param fs File system
-   * @return the table's all directory path(s) which has an oap meta file
+   * @return the table's all directory path(s) which has oap meta file or data files
    */
   private def getPartitionPaths(directoryPaths: Seq[Path], fs: FileSystem): Seq[Path] = {
-    directoryPaths.filter(path => fs.exists(new Path(path, OapFileFormat.OAP_META_FILE))) ++
+    directoryPaths.filter(isTargetPath(_, fs)) ++
       fs.listStatus(directoryPaths.toArray[Path]).filter(_.isDirectory).flatMap { status =>
         getPartitionPaths(Seq(status.getPath), fs)
       }
+  }
+
+  /**
+   * identify whether a path contains meta file or data files(s)
+   * @param path the path to be checked
+   * @param fs file system
+   * @return true if the path directory contains meta or data file(s), otherwise false
+   */
+  private def isTargetPath(path: Path, fs: FileSystem): Boolean = {
+    fs.exists(new Path(path, OapFileFormat.OAP_META_FILE)) ||
+      fs.listStatus(path).filter(_.isFile).exists(status => isDataPath(status.getPath))
+  }
+
+  private def isDataPath(path: Path): Boolean = {
+    val name = path.getName
+    !((name.startsWith("_") && !name.contains("=")) || name.startsWith("."))
   }
 
   def keyFromBytes(bytes: Array[Byte], dataType: DataType): Option[Key] = {
@@ -167,6 +183,7 @@ object OapUtils extends Logging {
    * @return all valid files grouped into partition(s) on the disk
    */
   @Deprecated
+  // deprecated, use "getPartitionPaths" to get valid partition path(s)
   def getPartitionsRefreshed(
       fileIndex: FileIndex,
       partitionSpec: Option[TablePartitionSpec] = None): Seq[PartitionDirectory] = {

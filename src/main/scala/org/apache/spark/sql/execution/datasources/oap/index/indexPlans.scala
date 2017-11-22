@@ -516,7 +516,6 @@ case class OapCheckIndex(
   override val output: Seq[Attribute] =
     AttributeReference("Analysis Result", StringType, nullable = false)() :: Nil
 
-  @Deprecated
   private def checkOapMetaFile(
       fs: FileSystem,
       partitionDirs: Seq[Path]): (Seq[Path], Seq[Path]) = {
@@ -526,7 +525,6 @@ case class OapCheckIndex(
       fs.exists(new Path(partitionDir, OapFileFormat.OAP_META_FILE)))
   }
 
-  @Deprecated
   private def processPartitionsWithNoMeta(partitionDirs: Seq[Path]): Seq[Row] = {
     partitionDirs.map(partitionPath =>
       Row(s"Meta file not found in partition: ${partitionPath.toUri.getPath}"))
@@ -655,8 +653,10 @@ case class OapCheckIndex(
       val partitionDirs =
         OapUtils.getPartitionPaths(rootPaths, fs, fileCatalog.partitionSchema, partitionSpec)
 
-      analyzeIndexBetweenPartitions(sparkSession, fs, partitionDirs)
-      partitionDirs.flatMap(checkEachPartition(sparkSession, fs, dataSchema, _))
+      val (partitionWithMeta, partitionWithNoMeta) = checkOapMetaFile(fs, partitionDirs)
+      analyzeIndexBetweenPartitions(sparkSession, fs, partitionWithMeta)
+      processPartitionsWithNoMeta(partitionWithNoMeta) ++
+        partitionWithMeta.flatMap(checkEachPartition(sparkSession, fs, dataSchema, _))
     }
 
   }

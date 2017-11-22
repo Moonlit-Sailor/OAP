@@ -61,7 +61,7 @@ class OapCheckIndexSuite extends QueryTest with SharedSQLContext with BeforeAndA
     checkAnswer(sql("check oindex on oap_test_2"), Nil)
   }
 
-  ignore("check existent meta file") {
+  test("check existent meta file") {
     val data: Seq[(Int, String)] = (1 to 300).map { i => (i, s"this is test $i") }
     val df = data.toDF("key", "value")
     val path = Utils.createTempDir().toString
@@ -71,7 +71,7 @@ class OapCheckIndexSuite extends QueryTest with SharedSQLContext with BeforeAndA
     checkAnswer(sql("check oindex on t"), Nil)
   }
 
-  ignore("check nonexistent meta file") {
+  test("check nonexistent meta file") {
     val data: Seq[(Int, String)] = (1 to 300).map { i => (i, s"this is test $i") }
     val df = data.toDF("key", "value")
     val path = Utils.createTempDir().toString
@@ -84,7 +84,7 @@ class OapCheckIndexSuite extends QueryTest with SharedSQLContext with BeforeAndA
       Row(s"Meta file not found in partition: $path"))
   }
 
-  ignore("check meta file: Partially missing") {
+  test("check meta file: Partially missing") {
     val data: Seq[(Int, Int)] = (1 to 10).map { i => (i, i) }
     data.toDF("key", "value").createOrReplaceTempView("t")
 
@@ -116,15 +116,11 @@ class OapCheckIndexSuite extends QueryTest with SharedSQLContext with BeforeAndA
   test("check index on table") {
     val data: Seq[(Int, String)] = (1 to 300).map { i => (i, s"this is test $i") }
     data.toDF("key", "value").createOrReplaceTempView("t")
-    sql("insert overwrite table oap_test_1 select * from t")
     sql("insert overwrite table oap_test_2 select * from t")
 
-    checkAnswer(sql("check oindex on oap_test_1"), Nil)
     checkAnswer(sql("check oindex on oap_test_2"), Nil)
 
-    sql("create oindex index1 on oap_test_1 (a)")
     sql("create oindex index1 on oap_test_2 (a)")
-    checkAnswer(sql("check oindex on oap_test_1"), Nil)
     checkAnswer(sql("check oindex on oap_test_2"), Nil)
   }
 
@@ -201,7 +197,13 @@ class OapCheckIndexSuite extends QueryTest with SharedSQLContext with BeforeAndA
         |SELECT key from t where value == 4
       """.stripMargin)
 
-    checkAnswer(sql("check oindex on oap_partition_table"), Nil)
+    val path1 = new Path(spark.sqlContext.conf.warehousePath + "/oap_partition_table/b=1/c=c1")
+    val path2 = new Path(spark.sqlContext.conf.warehousePath + "/oap_partition_table/b=2/c=c2")
+
+    checkAnswer(sql("check oindex on oap_partition_table"),
+      Seq(Row(s"Meta file not found in partition: ${path1.toUri.getPath}"),
+        Row(s"Meta file not found in partition: ${path2.toUri.getPath}")))
+
     sql("create oindex idx1 on oap_partition_table(a)")
 
     checkAnswer(sql("check oindex on oap_partition_table"), Nil)
@@ -306,12 +308,18 @@ class OapCheckIndexSuite extends QueryTest with SharedSQLContext with BeforeAndA
         |SELECT key from t where value == 104
       """.stripMargin)
 
-    checkAnswer(sql("check oindex on oap_partition_table"), Nil)
+    val path1 = new Path(spark.sqlContext.conf.warehousePath + "/oap_partition_table/b=1/c=c1")
+    val path2 = new Path(spark.sqlContext.conf.warehousePath + "/oap_partition_table/b=2/c=c2")
+
+    checkAnswer(sql("check oindex on oap_partition_table"),
+      Seq(Row(s"Meta file not found in partition: ${path1.toUri.getPath}"),
+        Row(s"Meta file not found in partition: ${path2.toUri.getPath}")))
 
     // Create a B+ tree index on Column("a")
     sql("create oindex idx1 on oap_partition_table(a) partition(b=1, c='c1')")
 
-    checkAnswer(sql("check oindex on oap_partition_table"), Nil)
+    checkAnswer(sql("check oindex on oap_partition_table"),
+      Row(s"Meta file not found in partition: ${path2.toUri.getPath}"))
 
     sql("create oindex idx1 on oap_partition_table(a) using bitmap partition(b=2, c='c2')")
 
@@ -323,7 +331,7 @@ class OapCheckIndexSuite extends QueryTest with SharedSQLContext with BeforeAndA
 
   }
 
-  ignore("check index on partitioned table for a specified partition: Missing meta file") {
+  test("check index on partitioned table for a specified partition: Missing meta file") {
     val data: Seq[(Int, Int)] = (1 to 10).map { i => (i, i) }
     data.toDF("key", "value").createOrReplaceTempView("t")
 
@@ -341,15 +349,21 @@ class OapCheckIndexSuite extends QueryTest with SharedSQLContext with BeforeAndA
         |SELECT key from t where value == 4
       """.stripMargin)
 
-//    val partitionPath =
-//      new Path(spark.sqlContext.conf.warehousePath + "/oap_partition_table/b=2/c=c2")
-//    checkAnswer(
-//      sql("check oindex on oap_partition_table partition(b=2, c='c2')"),
-//      Row(s"Meta file not found in partition: ${partitionPath.toUri.getPath}"))
+    val partitionPath =
+      new Path(spark.sqlContext.conf.warehousePath + "/oap_partition_table/b=2/c=c2")
+    checkAnswer(
+      sql("check oindex on oap_partition_table partition(b=2, c='c2')"),
+      Row(s"Meta file not found in partition: ${partitionPath.toUri.getPath}"))
 
     sql("create oindex idx1 on oap_partition_table(a) partition(b=2, c='c2')")
 
     checkAnswer(sql("check oindex on oap_partition_table partition(b=2, c='c2')"), Nil)
+
+    Utils.deleteRecursively(new File(partitionPath.toUri.getPath, OapFileFormat.OAP_META_FILE))
+
+    checkAnswer(
+      sql("check oindex on oap_partition_table partition(b=2, c='c2')"),
+      Row(s"Meta file not found in partition: ${partitionPath.toUri.getPath}"))
   }
 
   test("check index on partitioned table for a specified partition: Missing data file") {
