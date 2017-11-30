@@ -153,7 +153,7 @@ class BTreeRecordReaderWriterSuite extends SparkFunSuite {
     val footer = BTreeIndexRecordReader.BTreeFooter(
       new ChunkedByteBuffer(ByteBuffer.wrap(fileWriter.footer)))
     val nodeCount = footer.getNodesCount
-    assert(footer.getRecordCount === records.size)
+    assert(footer.getNonNullKeyRecordCount === records.size)
     assert(nodeCount === fileWriter.nodes.size)
 
     val nodeSizeSeq = (0 until nodeCount).map(footer.getNodeSize)

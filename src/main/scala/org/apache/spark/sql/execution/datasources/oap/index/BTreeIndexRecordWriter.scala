@@ -54,7 +54,7 @@ private[index] case class BTreeIndexRecordWriter(
     fileWriter.close()
   }
 
-  private[index] def sortUniqueKeys(): Array[InternalRow] = {
+  private[index] def sortUniqueKeys(): (Array[InternalRow], Array[InternalRow]) = {
     def buildOrdering(keySchema: StructType): Ordering[InternalRow] = {
       // here i change to use param id to index_id to get data type in keySchema
       val order = keySchema.zipWithIndex.map {
@@ -74,6 +74,8 @@ private[index] case class BTreeIndexRecordWriter(
     val partitionUniqueSize = multiHashMap.keySet().size()
     val uniqueKeys = multiHashMap.keySet().toArray(new Array[InternalRow](partitionUniqueSize))
     assert(uniqueKeys.size == partitionUniqueSize)
+    val (nullKeys, nonNullKeys) = uniqueKeys.partition(_.anyNull)
+    assert(nullKeys.length + nonNullKeys.length == partitionUniqueSize)
     lazy val comparator: Comparator[InternalRow] = new Comparator[InternalRow]() {
       override def compare(o1: InternalRow, o2: InternalRow): Int = {
         if (o1 == null && o2 == null) {
@@ -88,8 +90,9 @@ private[index] case class BTreeIndexRecordWriter(
       }
     }
     // sort keys
-    java.util.Arrays.sort(uniqueKeys, comparator)
-    uniqueKeys
+    java.util.Arrays.sort(nonNullKeys, comparator)
+//    uniqueKeys
+    (nullKeys, nonNullKeys)
   }
 
   /**
@@ -102,8 +105,8 @@ private[index] case class BTreeIndexRecordWriter(
    *  5. Call fileWriter.end() to write some meta data (e.g. file offset for each section)
    */
   private[index] def flush(): Unit = {
-    val uniqueKeys = sortUniqueKeys()
-    val treeShape = BTreeUtils.generate2(uniqueKeys.length)
+    val (nullKeys, nonNullUniqueKeys) = sortUniqueKeys()
+    val treeShape = BTreeUtils.generate2(nonNullUniqueKeys.length)
     // Trick here. If root node has no child, then write root node as a child.
     val children = if (treeShape.children.nonEmpty) treeShape.children else treeShape :: Nil
 
@@ -114,8 +117,9 @@ private[index] case class BTreeIndexRecordWriter(
     var startPosInRowList = 0
     val nodes =
       children.map { node =>
-        val keyCount = sumKeyCount(node)
-        val nodeUniqueKeys = uniqueKeys.slice(startPosInKeyList, startPosInKeyList + keyCount)
+        val keyCount = sumKeyCount(node) // total number of keys of this node
+        val nodeUniqueKeys = nonNullUniqueKeys.slice(startPosInKeyList, startPosInKeyList + keyCount)
+        // total number of row ids of this node
         val rowCount = nodeUniqueKeys.map(multiHashMap.get(_).size()).sum
 
         val nodeBuf = serializeNode(nodeUniqueKeys, startPosInRowList)
@@ -125,9 +129,10 @@ private[index] case class BTreeIndexRecordWriter(
         BTreeNodeMetaData(rowCount, nodeBuf.length, nodeUniqueKeys.head, nodeUniqueKeys.last)
       }
     // Write Row Id List
-    fileWriter.writeRowIdList(serializeRowIdLists(uniqueKeys))
+    fileWriter.writeRowIdList(serializeRowIdLists(nonNullUniqueKeys ++ nullKeys))
     // Write Footer
-    fileWriter.writeFooter(serializeFooter(nodes))
+    val nullKeyRowCount = nullKeys.map(multiHashMap.get(_).size()).sum
+    fileWriter.writeFooter(serializeFooter(nullKeyRowCount, nodes))
     // End
     fileWriter.end()
   }
@@ -187,7 +192,8 @@ private[index] case class BTreeIndexRecordWriter(
   /**
    * Layout of Footer:
    * Field Description              Byte Size
-   * Row Count                      4 Bytes
+   * Row Count with Non-Null Key    4 Bytes
+   * Row Count With Null Key        4 Bytes
    * Node Count                     4 Bytes
    * Nodes Meta Data                Node Count * 20 Bytes
    * Row Count                        4 Bytes
@@ -203,15 +209,17 @@ private[index] case class BTreeIndexRecordWriter(
    * Max Key For Child #N - Max
    * TODO: Make serialize and deserialize(in reader) in same style.
    */
-  private def serializeFooter(nodes: Seq[BTreeNodeMetaData]): Array[Byte] = {
+  private def serializeFooter(nullKeyRowCount: Int, nodes: Seq[BTreeNodeMetaData]): Array[Byte] = {
     val buffer = new ByteArrayOutputStream()
     val output = new LittleEndianDataOutputStream(buffer)
 
     val keyBuffer = new ByteArrayOutputStream()
     val keyOutput = new LittleEndianDataOutputStream(keyBuffer)
 
-    // Record Count
+    // Record Count(all with non-null key) of all nodes in B+ tree
     output.writeInt(nodes.map(_.rowCount).sum)
+    // Count of Record(s) that have null key
+    output.writeInt(nullKeyRowCount)
     // Child Count
     output.writeInt(nodes.size)
 

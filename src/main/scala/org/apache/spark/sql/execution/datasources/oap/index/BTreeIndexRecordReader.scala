@@ -63,14 +63,17 @@ private[index] case class BTreeIndexRecordReader(
     internalIterator = intervalArray.toIterator.flatMap { interval =>
       val (start, end) = findRowIdRange(interval)
       (start until end).toIterator.map(rowIdList.getRowId)
-    }
+    } // get the row ids
   }
-
+  // find the row id list start pos, end pos of the range interval
   private[index] def findRowIdRange(interval: RangeInterval): (Int, Int) = {
+    val recordCount = footer.getNonNullKeyRecordCount
+    if (interval.isNullPredicate) { // process "isNull" predicate
+      return (recordCount, recordCount + footer.getNullKeyRecordCount)
+    }
     val (nodeIdxForStart, isStartFound) = findNodeIdx(interval.start, isStart = true)
     val (nodeIdxForEnd, isEndFound) = findNodeIdx(interval.end, isStart = false)
 
-    val recordCount = footer.getRecordCount
     if (nodeIdxForStart == nodeIdxForEnd && !isStartFound && !isEndFound) {
       (0, 0)
     } else {
@@ -114,7 +117,7 @@ private[index] case class BTreeIndexRecordReader(
 
     val rowPos =
       if (keyPos == keyCount) {
-        if (nodeIdx + 1 == footer.getNodesCount) footer.getRecordCount
+        if (nodeIdx + 1 == footer.getNodesCount) footer.getNonNullKeyRecordCount
         else {
           val offset = footer.getNodeOffset(nodeIdx + 1)
           val size = footer.getNodeSize(nodeIdx + 1)
@@ -239,15 +242,17 @@ private[index] object BTreeIndexRecordReader {
     private val nodeSizeOffset = Integer.SIZE / 8 * 2
     private val minPosOffset = Integer.SIZE / 8 * 3
     private val maxPosOffset = Integer.SIZE / 8 * 4
-    private val nodeMetaStart = Integer.SIZE / 8 * 2
+    private val nodeMetaStart = Integer.SIZE / 8 * 3
     private val nodeMetaByteSize = Integer.SIZE / 8 * 5
 
     private val (baseObj, baseOffset): (Object, Long) = buf.chunks.head match {
       case db: DirectBuffer => (null, db.address())
       case _ => (buf.toArray, Platform.BYTE_ARRAY_OFFSET)
     }
-    def getRecordCount: Int = Platform.getInt(baseObj, baseOffset)
-    def getNodesCount: Int = Platform.getInt(baseObj, baseOffset + Integer.SIZE / 8)
+    def getNonNullKeyRecordCount: Int = Platform.getInt(baseObj, baseOffset)
+    def getNullKeyRecordCount: Int = Platform.getInt(baseObj, baseOffset + Integer.SIZE / 8)
+    def getNodesCount: Int = Platform.getInt(baseObj, baseOffset + Integer.SIZE / 8 * 2)
+    // get idx Node's max value
     def getMaxValue(idx: Int, schema: StructType): InternalRow =
       BTreeIndexRecordReader.readBasedOnSchema(baseObj, baseOffset + getMaxValueOffset(idx), schema)
     def getMinValue(idx: Int, schema: StructType): InternalRow =
@@ -266,7 +271,7 @@ private[index] object BTreeIndexRecordReader {
 
   private[index] case class BTreeRowIdList(buf: ChunkedByteBuffer) {
     private val (baseObj, baseOffset): (Object, Long) = buf.chunks.head match {
-      case db: DirectBuffer => (null, db.address())
+      case db: DirectBuffer => (null, db.address()) // Off-Heap
       case _ => (buf.toArray, Platform.BYTE_ARRAY_OFFSET)
     }
     def getRowId(idx: Int): Int = Platform.getInt(baseObj, baseOffset + idx * Integer.SIZE / 8)
