@@ -118,7 +118,8 @@ private[index] case class BTreeIndexRecordWriter(
     val nodes =
       children.map { node =>
         val keyCount = sumKeyCount(node) // total number of keys of this node
-        val nodeUniqueKeys = nonNullUniqueKeys.slice(startPosInKeyList, startPosInKeyList + keyCount)
+        val nodeUniqueKeys =
+          nonNullUniqueKeys.slice(startPosInKeyList, startPosInKeyList + keyCount)
         // total number of row ids of this node
         val rowCount = nodeUniqueKeys.map(multiHashMap.get(_).size()).sum
 
