@@ -134,8 +134,10 @@ private[index] case class BTreeIndexRecordWriter(
         }
         else BTreeNodeMetaData(rowCount, nodeBuf.length, nodeUniqueKeys.head, nodeUniqueKeys.last)
       }
-    // Write Row Id List
-    fileWriter.writeRowIdList(serializeRowIdLists(nonNullUniqueKeys ++ nullKeys))
+    // Write Non-null key Row Id List
+    fileWriter.writeRowIdList(serializeRowIdLists(nonNullUniqueKeys))
+    // Write Null key Row Id List
+    fileWriter.writeRowIdList(serializeRowIdLists(nullKeys))
     // Write Footer
     val nullKeyRowCount = nullKeys.map(multiHashMap.get(_).size()).sum
     fileWriter.writeFooter(serializeFooter(nullKeyRowCount, nodes))
