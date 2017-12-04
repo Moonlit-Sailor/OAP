@@ -33,6 +33,7 @@ import org.apache.spark.sql.catalyst.expressions.codegen.GenerateOrdering
 import org.apache.spark.sql.execution.datasources.oap.utils.{BTreeNode, BTreeUtils}
 import org.apache.spark.sql.types._
 
+
 private[index] case class BTreeIndexRecordWriter(
     configuration: Configuration,
     fileWriter: BTreeIndexFileWriter,
@@ -127,7 +128,11 @@ private[index] case class BTreeIndexRecordWriter(
         fileWriter.writeNode(nodeBuf)
         startPosInKeyList += keyCount
         startPosInRowList += rowCount
-        BTreeNodeMetaData(rowCount, nodeBuf.length, nodeUniqueKeys.head, nodeUniqueKeys.last)
+        if (keyCount == 0 || nodeUniqueKeys.isEmpty || nonNullUniqueKeys.isEmpty) {
+          // this node is an empty node
+          BTreeNodeMetaData(0, nodeBuf.length, null, null)
+        }
+        else BTreeNodeMetaData(rowCount, nodeBuf.length, nodeUniqueKeys.head, nodeUniqueKeys.last)
       }
     // Write Row Id List
     fileWriter.writeRowIdList(serializeRowIdLists(nonNullUniqueKeys ++ nullKeys))
@@ -234,10 +239,14 @@ private[index] case class BTreeIndexRecordWriter(
       output.writeInt(node.byteSize)
       // Min Key Pos for each Child
       output.writeInt(keyBuffer.size())
-      IndexUtils.writeBasedOnSchema(keyOutput, node.min, keySchema)
+      if (node.min != null) {
+        IndexUtils.writeBasedOnSchema(keyOutput, node.min, keySchema)
+      }
       // Max Key Pos for each Child
       output.writeInt(keyBuffer.size())
-      IndexUtils.writeBasedOnSchema(keyOutput, node.max, keySchema)
+      if (node.max != null) {
+        IndexUtils.writeBasedOnSchema(keyOutput, node.max, keySchema)
+      }
       offset += node.byteSize
     }
     buffer.toByteArray ++ keyBuffer.toByteArray

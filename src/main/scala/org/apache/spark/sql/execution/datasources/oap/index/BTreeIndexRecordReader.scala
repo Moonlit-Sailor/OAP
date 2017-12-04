@@ -27,6 +27,7 @@ import org.apache.spark.sql.catalyst.expressions.codegen.GenerateOrdering
 import org.apache.spark.sql.execution.datasources.oap.filecache.{BTreeFiber, FiberCache, FiberCacheManager}
 import org.apache.spark.sql.types._
 
+
 private[index] case class BTreeIndexRecordReader(
     configuration: Configuration,
     schema: StructType) extends Iterator[Int] {
@@ -72,7 +73,7 @@ private[index] case class BTreeIndexRecordReader(
     val (nodeIdxForEnd, isEndFound) = findNodeIdx(interval.end, isStart = false)
 
     if (nodeIdxForStart == nodeIdxForEnd && !isStartFound && !isEndFound) {
-      (0, 0)
+      (0, 0) // not found in B+ tree
     } else {
       val start = if (interval.start == IndexScanner.DUMMY_KEY_START) 0
       else {
@@ -142,11 +143,13 @@ private[index] case class BTreeIndexRecordReader(
    */
   private def findNodeIdx(candidate: InternalRow, isStart: Boolean): (Option[Int], Boolean) = {
     val idxOption = (0 until footer.getNodesCount).find { idx =>
-      rowOrdering(candidate, footer.getMaxValue(idx, schema), isStart) <= 0
+      footer.getRowCountOfNode(idx) > 0 && // ensure this node is not an empty node
+        rowOrdering(candidate, footer.getMaxValue(idx, schema), isStart) <= 0
     }
 
     (idxOption, idxOption.exists { idx =>
-      rowOrdering(candidate, footer.getMinValue(idx, schema), isStart) >= 0
+      footer.getRowCountOfNode(idx) > 0 && // ensure this node is not an empty node
+        rowOrdering(candidate, footer.getMinValue(idx, schema), isStart) >= 0
     })
   }
 
@@ -243,6 +246,8 @@ private[index] object BTreeIndexRecordReader {
     def getMaxValueOffset(idx: Int): Int =
       fiberCache.getInt(nodeMetaStart + nodeMetaByteSize * idx + maxPosOffset) +
           nodeMetaStart + nodeMetaByteSize * getNodesCount
+    def getRowCountOfNode(idx: Int): Int =
+      fiberCache.getInt(nodeMetaStart + idx * nodeMetaByteSize)
     def getNodeOffset(idx: Int): Int =
       fiberCache.getInt(nodeMetaStart + idx * nodeMetaByteSize + nodePosOffset)
     def getNodeSize(idx: Int): Int =
