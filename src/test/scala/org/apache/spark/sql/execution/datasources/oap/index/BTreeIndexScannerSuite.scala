@@ -33,6 +33,10 @@ import org.apache.spark.util.Utils
 class BTreeIndexScannerSuite extends SharedSQLContext {
   sparkConf.set("spark.memory.offHeap.size", "100m")
 
+  // Override afterEach because we do not want to check open streams
+  override def beforeEach(): Unit = {}
+  override def afterEach(): Unit = {}
+
   test("test rowOrdering") {
     // Only check Integer is enough. We use [[GenerateOrdering]] to handle different data types.
     val fields = StructField("col1", IntegerType) :: StructField("col2", IntegerType) :: Nil
