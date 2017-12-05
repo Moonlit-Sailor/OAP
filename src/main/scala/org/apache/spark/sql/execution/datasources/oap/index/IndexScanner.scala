@@ -27,6 +27,7 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions.UnsafeRow
 import org.apache.spark.sql.execution.datasources.oap._
 import org.apache.spark.sql.execution.datasources.oap.io.OapIndexInfo
+import org.apache.spark.sql.execution.datasources.oap.statistics.StaticsAnalysisResult
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types.StructType
@@ -38,7 +39,7 @@ private[oap] object IndexScanner {
 }
 
 private[oap] abstract class IndexScanner(idxMeta: IndexMeta)
-  extends Iterator[Long] with Serializable with Logging{
+  extends Iterator[Int] with Serializable with Logging{
 
   // TODO Currently, only B+ tree supports indexs, so this flag is toggled only in
   // BPlusTreeScanner we can add other index-aware stats for other type of index later
@@ -112,12 +113,11 @@ private[oap] abstract class IndexScanner(idxMeta: IndexMeta)
       val dataFileSize = dataPath.getFileSystem(conf).getContentSummary(dataPath).getLength
       val ratio = conf.getDouble(SQLConf.OAP_INDEX_FILE_SIZE_MAX_RATIO.key,
         SQLConf.OAP_INDEX_FILE_SIZE_MAX_RATIO.defaultValue.get)
-      indexFileSize <= dataFileSize * ratio
+      if (indexFileSize > dataFileSize * ratio) return false
 
       // Policy 2: statistics tells the scan cost
-      // TODO: Get statistics info after statistics is enabled.
-      // val statsAnalyseResult = tryToReadStatistics(indexPath, conf)
-      // statsAnalyseResult == StaticsAnalysisResult.USE_INDEX
+      val statsAnalyseResult = tryToReadStatistics(indexPath, conf)
+      statsAnalyseResult == StaticsAnalysisResult.USE_INDEX
 
       // More Policies
     } else {
@@ -125,6 +125,24 @@ private[oap] abstract class IndexScanner(idxMeta: IndexMeta)
       true
     }
   }
+
+  /**
+   * Through getting statistics from related index file,
+   * judging if we should bypass this datafile or full scan or by index.
+   * return -1 means bypass, close to 1 means full scan and close to 0 means by index.
+   * called before invoking [[initialize]].
+   */
+  private def tryToReadStatistics(indexPath: Path, conf: Configuration): Double = {
+    if (!canBeOptimizedByStatistics) {
+      StaticsAnalysisResult.USE_INDEX
+    } else if (intervalArray.isEmpty) {
+      StaticsAnalysisResult.SKIP_INDEX
+    } else {
+      readStatistics(indexPath, conf)
+    }
+  }
+
+  protected def readStatistics(indexPath: Path, conf: Configuration): Double = 0
 
   def withKeySchema(schema: StructType): IndexScanner = {
     this.keySchema = schema
@@ -138,7 +156,7 @@ private[oap] abstract class IndexScanner(idxMeta: IndexMeta)
 private[oap] object DUMMY_SCANNER extends IndexScanner(null) {
   override def initialize(path: Path, configuration: Configuration): IndexScanner = { this }
   override def hasNext: Boolean = false
-  override def next(): Long = throw new NoSuchElementException("end of iterating.")
+  override def next(): Int = throw new NoSuchElementException("end of iterating.")
   override def meta: IndexMeta = throw new NotImplementedError()
 }
 

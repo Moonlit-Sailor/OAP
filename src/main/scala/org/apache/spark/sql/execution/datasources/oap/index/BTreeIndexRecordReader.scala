@@ -47,6 +47,8 @@ private[index] case class BTreeIndexRecordReader(
   private lazy val ordering = GenerateOrdering.create(schema)
   private lazy val partialOrdering = GenerateOrdering.create(StructType(schema.dropRight(1)))
 
+  def getFooterFiber: FiberCache = footerCache
+
   def initialize(path: Path, intervalArray: ArrayBuffer[RangeInterval]): Unit = {
     reader = BTreeIndexFileReader(configuration, path)
 
@@ -225,12 +227,14 @@ private[index] case class BTreeIndexRecordReader(
 private[index] object BTreeIndexRecordReader {
 
   private[index] case class BTreeFooter(fiberCache: FiberCache) {
+    // TODO move to companion object
     private val nodePosOffset = Integer.SIZE / 8
     private val nodeSizeOffset = Integer.SIZE / 8 * 2
     private val minPosOffset = Integer.SIZE / 8 * 3
     private val maxPosOffset = Integer.SIZE / 8 * 4
     private val nodeMetaStart = Integer.SIZE / 8 * 3
     private val nodeMetaByteSize = Integer.SIZE / 8 * 5
+    private val statsLengthSize = Integer.SIZE / 8
 
     def getNonNullKeyRecordCount: Int = fiberCache.getInt(0)
     def getNullKeyRecordCount: Int = fiberCache.getInt(Integer.SIZE / 8)
@@ -242,16 +246,19 @@ private[index] object BTreeIndexRecordReader {
       IndexUtils.readBasedOnSchema(fiberCache, getMinValueOffset(idx), schema)
     def getMinValueOffset(idx: Int): Int =
       fiberCache.getInt(nodeMetaStart + nodeMetaByteSize * idx + minPosOffset) +
-          nodeMetaStart + nodeMetaByteSize * getNodesCount
+          nodeMetaStart + nodeMetaByteSize * getNodesCount + statsLengthSize + getStatsLength
     def getMaxValueOffset(idx: Int): Int =
       fiberCache.getInt(nodeMetaStart + nodeMetaByteSize * idx + maxPosOffset) +
-          nodeMetaStart + nodeMetaByteSize * getNodesCount
+        nodeMetaStart + nodeMetaByteSize * getNodesCount + statsLengthSize + getStatsLength
     def getRowCountOfNode(idx: Int): Int =
       fiberCache.getInt(nodeMetaStart + idx * nodeMetaByteSize)
     def getNodeOffset(idx: Int): Int =
       fiberCache.getInt(nodeMetaStart + idx * nodeMetaByteSize + nodePosOffset)
     def getNodeSize(idx: Int): Int =
       fiberCache.getInt(nodeMetaStart + idx * nodeMetaByteSize + nodeSizeOffset)
+    def getStatsOffset: Int = nodeMetaStart + nodeMetaByteSize * getNodesCount + statsLengthSize
+    private def getStatsLength: Int = fiberCache.getInt(
+      nodeMetaStart + nodeMetaByteSize * getNodesCount)
   }
 
   private[index] case class BTreeRowIdList(fiberCache: FiberCache) {

@@ -215,7 +215,7 @@ private [oap] class RangeInterval(
     e: Key,
     includeStart: Boolean,
     includeEnd: Boolean,
-    isNull: Boolean) extends Serializable {
+    isNull: Boolean = false) extends Serializable {
   var start = s
   var end = e
   var startInclude = includeStart

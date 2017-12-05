@@ -30,6 +30,7 @@ import org.apache.parquet.bytes.LittleEndianDataOutputStream
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateOrdering
+import org.apache.spark.sql.execution.datasources.oap.statistics.StatisticsManager
 import org.apache.spark.sql.execution.datasources.oap.utils.{BTreeNode, BTreeUtils}
 import org.apache.spark.sql.types._
 
@@ -43,10 +44,14 @@ private[index] case class BTreeIndexRecordWriter(
 
   private val multiHashMap = ArrayListMultimap.create[InternalRow, Int]()
   private var recordCount: Int = 0
+  private lazy val statisticsManager = new StatisticsManager {
+    this.initialize(BTreeIndexType, keySchema, configuration)
+  }
 
   override def write(key: Void, value: InternalRow): Unit = {
     val v = genericProjector(value).copy()
     multiHashMap.put(v, recordCount)
+    statisticsManager.addOapKey(v)
     recordCount += 1
   }
 
@@ -116,28 +121,28 @@ private[index] case class BTreeIndexRecordWriter(
     // Write Node
     var startPosInKeyList = 0
     var startPosInRowList = 0
-    val nodes =
-      children.map { node =>
-        val keyCount = sumKeyCount(node) // total number of keys of this node
-        val nodeUniqueKeys =
-          nonNullUniqueKeys.slice(startPosInKeyList, startPosInKeyList + keyCount)
-        // total number of row ids of this node
-        val rowCount = nodeUniqueKeys.map(multiHashMap.get(_).size()).sum
+    val nodes = children.map { node =>
+      val keyCount = sumKeyCount(node) // total number of keys of this node
+      val nodeUniqueKeys =
+        nonNullUniqueKeys.slice(startPosInKeyList, startPosInKeyList + keyCount)
+      // total number of row ids of this node
+      val rowCount = nodeUniqueKeys.map(multiHashMap.get(_).size()).sum
 
-        val nodeBuf = serializeNode(nodeUniqueKeys, startPosInRowList)
-        fileWriter.writeNode(nodeBuf)
-        startPosInKeyList += keyCount
-        startPosInRowList += rowCount
-        if (keyCount == 0 || nodeUniqueKeys.isEmpty || nonNullUniqueKeys.isEmpty) {
-          // this node is an empty node
-          BTreeNodeMetaData(0, nodeBuf.length, null, null)
-        }
-        else BTreeNodeMetaData(rowCount, nodeBuf.length, nodeUniqueKeys.head, nodeUniqueKeys.last)
+      val nodeBuf = serializeNode(nodeUniqueKeys, startPosInRowList)
+      fileWriter.writeNode(nodeBuf)
+      startPosInKeyList += keyCount
+      startPosInRowList += rowCount
+      if (keyCount == 0 || nodeUniqueKeys.isEmpty || nonNullUniqueKeys.isEmpty) {
+        // this node is an empty node
+        BTreeNodeMetaData(0, nodeBuf.length, null, null)
       }
+      else BTreeNodeMetaData(rowCount, nodeBuf.length, nodeUniqueKeys.head, nodeUniqueKeys.last)
+    }
     // Write Non-null key Row Id List
     fileWriter.writeRowIdList(serializeRowIdLists(nonNullUniqueKeys))
     // Write Null key Row Id List
     fileWriter.writeRowIdList(serializeRowIdLists(nullKeys))
+
     // Write Footer
     val nullKeyRowCount = nullKeys.map(multiHashMap.get(_).size()).sum
     fileWriter.writeFooter(serializeFooter(nullKeyRowCount, nodes))
@@ -224,6 +229,8 @@ private[index] case class BTreeIndexRecordWriter(
     val keyBuffer = new ByteArrayOutputStream()
     val keyOutput = new LittleEndianDataOutputStream(keyBuffer)
 
+    val statsBuffer = new ByteArrayOutputStream()
+
     // Record Count(all with non-null key) of all nodes in B+ tree
     output.writeInt(nodes.map(_.rowCount).sum)
     // Count of Record(s) that have null key
@@ -251,7 +258,10 @@ private[index] case class BTreeIndexRecordWriter(
       }
       offset += node.byteSize
     }
-    buffer.toByteArray ++ keyBuffer.toByteArray
+    // the return of write should be equal to statsBuffer.size
+    statisticsManager.write(statsBuffer)
+    output.writeInt(statsBuffer.size)
+    buffer.toByteArray ++ statsBuffer.toByteArray ++ keyBuffer.toByteArray
   }
 }
 
