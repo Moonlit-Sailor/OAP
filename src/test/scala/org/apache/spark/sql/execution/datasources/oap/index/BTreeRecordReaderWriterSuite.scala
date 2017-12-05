@@ -39,14 +39,14 @@ class BTreeRecordReaderWriterSuite extends SparkFunSuite {
   private class TestBTreeIndexFileWriter(conf: Configuration)
       extends BTreeIndexFileWriter(conf, new Path(Utils.createTempDir().getAbsolutePath, "temp")) {
     val nodes = new ArrayBuffer[Array[Byte]]()
-    var footer: Array[Byte] = new Array[Byte](0)
-    var rowIdList: Array[Byte] = new Array[Byte](0)
+    var footer: Array[Byte] = _
+    var rowIdList: Array[Byte] = _
     override def start(): Unit = {}
     override def end(): Unit = {}
     override def close(): Unit = {}
     override def writeNode(buf: Array[Byte]): Unit = nodes.append(buf)
-    override def writeRowIdList(buf: Array[Byte]): Unit = rowIdList = rowIdList ++ buf
-    override def writeFooter(buf: Array[Byte]): Unit = footer = footer ++ buf
+    override def writeRowIdList(buf: Array[Byte]): Unit = rowIdList = buf
+    override def writeFooter(buf: Array[Byte]): Unit = footer = buf
   }
   // Only test simple Int type since read/write based on schema can cover data type test
   private val schema = StructType(StructField("col", IntegerType) :: Nil)

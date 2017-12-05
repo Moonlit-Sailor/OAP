@@ -60,7 +60,7 @@ private[index] case class BTreeIndexRecordWriter(
     fileWriter.close()
   }
 
-  private[index] def sortUniqueKeys(): (Array[InternalRow], Array[InternalRow]) = {
+  private[index] def sortUniqueKeys(): (Seq[InternalRow], Seq[InternalRow]) = {
     def buildOrdering(keySchema: StructType): Ordering[InternalRow] = {
       // here i change to use param id to index_id to get data type in keySchema
       val order = keySchema.zipWithIndex.map {
@@ -97,8 +97,7 @@ private[index] case class BTreeIndexRecordWriter(
     }
     // sort keys
     java.util.Arrays.sort(nonNullKeys, comparator)
-//    uniqueKeys
-    (nullKeys, nonNullKeys)
+    (nullKeys.toSeq, nonNullKeys.toSeq)
   }
 
   /**
@@ -138,10 +137,8 @@ private[index] case class BTreeIndexRecordWriter(
       }
       else BTreeNodeMetaData(rowCount, nodeBuf.length, nodeUniqueKeys.head, nodeUniqueKeys.last)
     }
-    // Write Non-null key Row Id List
-    fileWriter.writeRowIdList(serializeRowIdLists(nonNullUniqueKeys))
-    // Write Null key Row Id List
-    fileWriter.writeRowIdList(serializeRowIdLists(nullKeys))
+    // Write Row Id List
+    fileWriter.writeRowIdList(serializeRowIdLists(nonNullUniqueKeys ++ nullKeys))
 
     // Write Footer
     val nullKeyRowCount = nullKeys.map(multiHashMap.get(_).size()).sum
@@ -166,7 +163,7 @@ private[index] case class BTreeIndexRecordWriter(
    * Key Data For Key #N
    */
   private[index] def serializeNode(
-      uniqueKeys: Array[InternalRow], startPosInRowList: Int): Array[Byte] = {
+      uniqueKeys: Seq[InternalRow], startPosInRowList: Int): Array[Byte] = {
     val buffer = new ByteArrayOutputStream()
     val output = new LittleEndianDataOutputStream(buffer)
     val keyBuffer = new ByteArrayOutputStream()
@@ -195,7 +192,7 @@ private[index] case class BTreeIndexRecordWriter(
    * Key:    1 2 3 4 1 2 3 4 1 2
    * Then Row Id List is Stored as: 0481592637
    */
-  private def serializeRowIdLists(uniqueKeys: Array[InternalRow]): Array[Byte] = {
+  private def serializeRowIdLists(uniqueKeys: Seq[InternalRow]): Array[Byte] = {
     val buffer = new ByteArrayOutputStream()
     val out = new LittleEndianDataOutputStream(buffer)
     uniqueKeys.flatMap(key => multiHashMap.get(key).asScala).foreach(out.writeInt)
