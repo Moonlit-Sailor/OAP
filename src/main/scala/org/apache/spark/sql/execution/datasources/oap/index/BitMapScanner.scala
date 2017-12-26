@@ -29,6 +29,7 @@ import org.roaringbitmap.RoaringBitmap
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateOrdering
+import org.apache.spark.sql.execution.datasources.OapException
 import org.apache.spark.sql.execution.datasources.oap._
 import org.apache.spark.sql.execution.datasources.oap.filecache._
 import org.apache.spark.sql.execution.datasources.oap.io.IndexFile
@@ -149,9 +150,24 @@ private[oap] case class BitMapScanner(idxMeta: IndexMeta) extends IndexScanner(i
     MemoryManager.putToIndexFiberCache(fin, bmNullEntryOffset, bmNullEntrySize)
   }
 
+  private def checkVersion(fin: FSDataInputStream): Unit = {
+    val fileVersion = new Array[Byte](IndexFile.FILEHEADER_LENGTH - IndexFile.HEADER_PREFIX.length)
+    fin.readFully(IndexFile.HEADER_PREFIX.length, fileVersion)
+    val versionData =
+      Array(
+        (IndexFile.INDEX_VERSION >> 8).toByte,
+        (IndexFile.INDEX_VERSION & 0xFF).toByte)
+
+    if (!versionData.sameElements(fileVersion)) {
+        fin.close()
+        throw new OapException("Bitmap Index File version is not compatible!")
+    }
+  }
+
   private def cacheBitmapAllSegments(idxPath: Path, conf: Configuration): Unit = {
     val fs = idxPath.getFileSystem(conf)
     val fin = fs.open(idxPath)
+    checkVersion(fin)
     val idxFileSize = fs.getFileStatus(idxPath).getLen.toInt
     bmFooterOffset = idxFileSize - BITMAP_FOOTER_SIZE
     // Cache the segments after first loading from file.
@@ -161,7 +177,7 @@ private[oap] case class BitMapScanner(idxMeta: IndexMeta) extends IndexScanner(i
     readBmFooterFromCache(bmFooterCache)
 
     // Get the offset for the different segments in bitmap index file.
-    bmUniqueKeyListOffset = IndexFile.indexFileHeaderLength
+    bmUniqueKeyListOffset = IndexFile.FILEHEADER_LENGTH
     bmEntryListOffset = bmUniqueKeyListOffset + bmUniqueKeyListTotalSize
     bmOffsetListOffset = bmEntryListOffset + bmEntryListTotalSize + bmNullEntrySize
 

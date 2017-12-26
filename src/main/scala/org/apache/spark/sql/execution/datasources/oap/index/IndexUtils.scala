@@ -32,13 +32,12 @@ import org.apache.spark.sql.execution.datasources.oap.io.IndexFile
 private[oap] object IndexUtils {
 
   def writeHead(writer: OutputStream, version: Int): Int = {
-    val headerContent = "OAPIDX"
-    writer.write(headerContent.getBytes("UTF-8"))
+    writer.write(IndexFile.HEADER_PREFIX.getBytes("UTF-8"))
     assert(version <= 65535)
     val versionData = Array((version >> 8).toByte, (version & 0xFF).toByte)
     writer.write(versionData)
-    assert((headerContent.length + versionData.length) == IndexFile.indexFileHeaderLength)
-    IndexFile.indexFileHeaderLength
+    assert(IndexFile.HEADER_PREFIX.length + versionData.length == IndexFile.FILEHEADER_LENGTH)
+    IndexFile.FILEHEADER_LENGTH
   }
 
   def indexFileFromDataFile(dataFile: Path, name: String, time: String): Path = {

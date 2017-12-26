@@ -53,6 +53,8 @@ private[index] case class BTreeIndexRecordReader(
   def initialize(path: Path, intervalArray: ArrayBuffer[RangeInterval]): Unit = {
     reader = BTreeIndexFileReader(configuration, path)
 
+    reader.checkVersion
+
     footerFiber = BTreeFiber(
       () => reader.readFooter(), reader.file.toString, reader.footerSectionId, 0)
     footerCache = FiberCacheManager.get(footerFiber, configuration)

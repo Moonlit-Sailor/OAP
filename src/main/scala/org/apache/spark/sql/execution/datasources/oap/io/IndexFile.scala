@@ -51,6 +51,7 @@ private[oap] case class IndexFile(file: Path) extends CommonIndexFile {
 }
 
 private[oap] object IndexFile {
-  val indexFileHeaderLength = 8
+  val FILEHEADER_LENGTH = 8
+  val HEADER_PREFIX = "OAPIDX"
   val INDEX_VERSION = 1
 }
