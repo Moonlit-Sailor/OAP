@@ -23,6 +23,7 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.execution.datasources.OapException
 import org.apache.spark.sql.execution.datasources.oap.filecache.{FiberCache, MemoryManager}
 import org.apache.spark.sql.execution.datasources.oap.io.IndexFile
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.unsafe.Platform
 
 private[oap] case class BTreeIndexFileReader(
@@ -37,6 +38,9 @@ private[oap] case class BTreeIndexFileReader(
   val footerSectionId: Int = 0
   val rowIdListSectionId: Int = 1
   val nodeSectionId: Int = 2
+
+  val rowIdListSizePerSection: Int =
+    configuration.getInt(SQLConf.OAP_BTREE_ROW_LIST_PART_SIZE.key, 1024 * 1024)
 
   private val (reader, fileLength) = {
     val fs = file.getFileSystem(configuration)
@@ -59,7 +63,7 @@ private[oap] case class BTreeIndexFileReader(
   private def getIntFromBuffer(buffer: Array[Byte], offset: Int) =
     Platform.getInt(buffer, Platform.BYTE_ARRAY_OFFSET + offset)
 
-  def checkVersion: Unit = {
+  def checkVersion(): Unit = {
     val fileVersion = new Array[Byte](VERSION_SIZE - IndexFile.HEADER_PREFIX.length)
     reader.readFully(IndexFile.HEADER_PREFIX.length, fileVersion)
     val versionData =
@@ -76,6 +80,17 @@ private[oap] case class BTreeIndexFileReader(
   def readFooter(): FiberCache =
     MemoryManager.putToIndexFiberCache(reader, footerIndex, footerLength)
 
+  def readRowIdList(partIdx: Int): FiberCache = {
+    val partSize = rowIdListSizePerSection * IndexUtils.INT_SIZE
+    val readLength = if (partIdx * partSize + partSize > rowIdListLength) {
+      rowIdListLength % partSize
+    } else {
+      partSize
+    }
+    MemoryManager.putToIndexFiberCache(reader, rowIdListIndex + partIdx * partSize, readLength)
+  }
+
+  @deprecated("no need to read the whole row id list", "v0.3")
   def readRowIdList(): FiberCache =
     MemoryManager.putToIndexFiberCache(reader, rowIdListIndex, rowIdListLength)
 
