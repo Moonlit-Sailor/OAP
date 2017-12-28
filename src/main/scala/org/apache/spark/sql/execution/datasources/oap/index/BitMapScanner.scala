@@ -45,7 +45,7 @@ private[oap] case class BitMapScanner(idxMeta: IndexMeta) extends IndexScanner(i
   @transient
   protected lazy val nnkr: NonNullKeyReader = new NonNullKeyReader(keySchema)
 
-  private val BITMAP_FOOTER_SIZE = 5 * 8
+  private val BITMAP_FOOTER_SIZE = 8 + 5 * 8
 
   private var bmUniqueKeyListTotalSize: Int = _
   private var bmUniqueKeyListCount: Int = _
@@ -114,12 +114,12 @@ private[oap] case class BitMapScanner(idxMeta: IndexMeta) extends IndexScanner(i
   }
 
   private def readBmFooterFromCache(data: FiberCache): Unit = {
-    bmUniqueKeyListTotalSize = data.getInt(0)
-    bmUniqueKeyListCount = data.getInt(4)
-    bmEntryListTotalSize = data.getInt(8)
-    bmOffsetListTotalSize = data.getInt(12)
-    bmNullEntryOffset = data.getInt(16)
-    bmNullEntrySize = data.getInt(20)
+    bmUniqueKeyListTotalSize = data.getInt(IndexUtils.INT_SIZE * 2)
+    bmUniqueKeyListCount = data.getInt(IndexUtils.INT_SIZE * 3)
+    bmEntryListTotalSize = data.getInt(IndexUtils.INT_SIZE * 4)
+    bmOffsetListTotalSize = data.getInt(IndexUtils.INT_SIZE * 5)
+    bmNullEntryOffset = data.getInt(IndexUtils.INT_SIZE * 6)
+    bmNullEntrySize = data.getInt(IndexUtils.INT_SIZE * 7)
   }
 
   private def loadBmKeyList(fin: FSDataInputStream): FiberCache = {
@@ -150,24 +150,23 @@ private[oap] case class BitMapScanner(idxMeta: IndexMeta) extends IndexScanner(i
     MemoryManager.putToIndexFiberCache(fin, bmNullEntryOffset, bmNullEntrySize)
   }
 
-  private def checkVersion(fin: FSDataInputStream): Unit = {
-    val fileVersion = new Array[Byte](IndexFile.VERSION_LENGTH - IndexFile.VERSION_PREFIX.length)
-    fin.readFully(IndexFile.VERSION_PREFIX.length, fileVersion)
-    val versionData =
-      Array(
-        (IndexFile.VERSION_NUM >> 8).toByte,
-        (IndexFile.VERSION_NUM & 0xFF).toByte)
+  private def checkVersion(fileVersion: Array[Byte], fin: FSDataInputStream): Unit = {
+    val versionData = IndexUtils.serializeVersion(IndexFile.VERSION_NUM)
 
     if (!versionData.sameElements(fileVersion)) {
-        fin.close()
-        throw new OapException("Bitmap Index File version is not compatible!")
+      fin.close()
+      throw new OapException("Bitmap Index File version is not compatible!")
     }
+  }
+
+  private def getIndexVersion: Array[Byte] = {
+    assert(bmFooterCache != null)
+    bmFooterCache.getBytes(0, IndexFile.VERSION_LENGTH)
   }
 
   private def cacheBitmapAllSegments(idxPath: Path, conf: Configuration): Unit = {
     val fs = idxPath.getFileSystem(conf)
     val fin = fs.open(idxPath)
-    checkVersion(fin)
     val idxFileSize = fs.getFileStatus(idxPath).getLen.toInt
     bmFooterOffset = idxFileSize - BITMAP_FOOTER_SIZE
     // Cache the segments after first loading from file.
@@ -175,6 +174,7 @@ private[oap] case class BitMapScanner(idxMeta: IndexMeta) extends IndexScanner(i
       () => loadBmFooter(fin), idxPath.toString, BitmapIndexSectionId.footerSection, 0)
     bmFooterCache = FiberCacheManager.get(bmFooterFiber, conf)
     readBmFooterFromCache(bmFooterCache)
+    checkVersion(getIndexVersion, fin)
 
     // Get the offset for the different segments in bitmap index file.
     bmUniqueKeyListOffset = IndexFile.VERSION_LENGTH

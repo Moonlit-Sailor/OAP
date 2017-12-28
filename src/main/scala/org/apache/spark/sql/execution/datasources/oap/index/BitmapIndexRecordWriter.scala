@@ -46,15 +46,22 @@ private[oap] object BitmapIndexSectionId {
 }
 
 /* Below is the bitmap index general layout and sections.
- * #section id        section size(B) section description
- * headerSection      4               header
- * keyListSection     varied          sorted unique key list (index column unique values)
- * entryListSection   varied          bitmap entry list
- * entryOffsetSection varied          bitmap entry offset list
- * statisticsSection  varied          keep the original statistics, not changed than before.
- * footerSection      40(5*8)         footer to save total key list size and length, total entry
- *                                    list size and total offset list size, and also the original
- *                                    index end.
+ * #section                size(B)       description
+ * headerSection           4             header
+ * keyListSection          varied        sorted unique key list (index column unique values)
+ * entryListSection        varied        bitmap entry list --
+ *                                       Null key's entries are appended to the end
+ * entryOffsetSection      varied        bitmap entry offset list
+ * statisticsSection       varied        keep the original statistics, not changed than before.
+ * footerSection           48(8 + 5*8)   footer to save total key list size and length, total entry
+ * Index version           8             list size, total offset list size, and also the original
+ * Non-null key List Size  4             index end.
+ * Non-Null key count      4
+ * Non-null key Entry Size 4
+ * Offset Section Size     4
+ * Null key entries offset 4
+ * Null key entry size     4
+ * Footer's start position 8
  *
  * TODO: 1. Bitmap index is suitable for the enumeration columns which actually has not many
  *          unique values, thus we will load the key list and offset list respectively as a
@@ -176,6 +183,7 @@ private[oap] class BitmapIndexRecordWriter(
     // The beginning of the footer are bitmap total size, key list size and offset total size.
     // Others keep back compatible and not changed than before.
     bmIndexEnd = bmEntryListOffset + bmEntryListTotalSize + bmNullEntrySize + bmOffsetListTotalSize
+    IndexUtils.writeBytes(writer, IndexUtils.serializeVersion(IndexFile.VERSION_NUM))
     IndexUtils.writeInt(writer, bmUniqueKeyListTotalSize)
     IndexUtils.writeInt(writer, bmUniqueKeyListCount)
     IndexUtils.writeInt(writer, bmEntryListTotalSize)
