@@ -30,7 +30,7 @@ private[oap] case class BTreeIndexFileReader(
     configuration: Configuration,
     file: Path) {
 
-  private val VERSION_SIZE = IndexFile.FILEHEADER_LENGTH
+  private val VERSION_SIZE = IndexFile.VERSION_LENGTH
   private val FOOTER_LENGTH_SIZE = IndexUtils.INT_SIZE
   private val ROW_ID_LIST_LENGTH_SIZE = IndexUtils.INT_SIZE
 
@@ -63,13 +63,8 @@ private[oap] case class BTreeIndexFileReader(
   private def getIntFromBuffer(buffer: Array[Byte], offset: Int) =
     Platform.getInt(buffer, Platform.BYTE_ARRAY_OFFSET + offset)
 
-  def checkVersion(): Unit = {
-    val fileVersion = new Array[Byte](VERSION_SIZE - IndexFile.HEADER_PREFIX.length)
-    reader.readFully(IndexFile.HEADER_PREFIX.length, fileVersion)
-    val versionData =
-      Array(
-        (IndexFile.INDEX_VERSION >> 8).toByte,
-        (IndexFile.INDEX_VERSION & 0xFF).toByte)
+  def checkVersion(fileVersion: Array[Byte]): Unit = {
+    val versionData = IndexUtils.serializeVersion(IndexFile.VERSION_NUM)
 
     if (!versionData.sameElements(fileVersion)) {
       reader.close()

@@ -129,7 +129,7 @@ private[oap] class BitmapIndexRecordWriter(
     /* TODO: 1. Use BitSet of Spark or Scala or Java to replace roaring bitmap.
      *       2. Optimize roaring bitmap usage to further reduce index file size.
      */
-    bmEntryListOffset = IndexFile.FILEHEADER_LENGTH + bmUniqueKeyListTotalSize
+    bmEntryListOffset = IndexFile.VERSION_LENGTH + bmUniqueKeyListTotalSize
     bmOffsetListBuffer = new mutable.ListBuffer[Int]()
     // Get the bitmap total size, and write each bitmap entrys one by one.
     var totalBitmapSize = 0
@@ -189,7 +189,7 @@ private[oap] class BitmapIndexRecordWriter(
   private def flushToFile(): Unit = {
     val statisticsWriteManager = new StatisticsWriteManager
     statisticsWriteManager.initialize(BitMapIndexType, keySchema, configuration)
-    IndexUtils.writeHead(writer, IndexFile.INDEX_VERSION)
+    IndexUtils.writeHead(writer, IndexFile.VERSION_NUM)
     writeUniqueKeyList()
     writeBmEntryList()
     writeBmOffsetList()
