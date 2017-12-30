@@ -208,7 +208,7 @@ private[index] case class BTreeIndexRecordWriter(
   /**
    * Layout of Footer:
    * Field Description              Byte Size
-   * Index Version                  8 Bytes
+   * Index Version Number           4 Bytes
    * Row Count with Non-Null Key    4 Bytes
    * Row Count With Null Key        4 Bytes
    * Node Count                     4 Bytes
@@ -234,8 +234,8 @@ private[index] case class BTreeIndexRecordWriter(
     val keyBuffer = new ByteArrayOutputStream()
     val statsBuffer = new ByteArrayOutputStream()
 
-    // Index File Version
-    IndexUtils.writeBytes(buffer, IndexUtils.serializeVersion(IndexFile.VERSION_NUM))
+    // Index File Version Number
+    IndexUtils.writeInt(buffer, IndexFile.VERSION_NUM)
     // Record Count(all with non-null key) of all nodes in B+ tree
     IndexUtils.writeInt(buffer, nodes.map(_.rowCount).sum)
     // Count of Record(s) that have null key

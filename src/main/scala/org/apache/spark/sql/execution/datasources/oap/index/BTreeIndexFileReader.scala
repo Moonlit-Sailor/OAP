@@ -63,10 +63,8 @@ private[oap] case class BTreeIndexFileReader(
   private def getIntFromBuffer(buffer: Array[Byte], offset: Int) =
     Platform.getInt(buffer, Platform.BYTE_ARRAY_OFFSET + offset)
 
-  def checkVersion(fileVersion: Array[Byte]): Unit = {
-    val versionData = IndexUtils.serializeVersion(IndexFile.VERSION_NUM)
-
-    if (!versionData.sameElements(fileVersion)) {
+  def checkVersionNum(versionNum: Int): Unit = {
+    if (IndexFile.VERSION_NUM != versionNum) {
       reader.close()
       throw new OapException("Btree Index File version is not compatible!")
     }
