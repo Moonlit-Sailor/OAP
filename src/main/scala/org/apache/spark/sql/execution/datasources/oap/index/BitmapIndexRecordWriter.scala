@@ -53,8 +53,8 @@ private[oap] object BitmapIndexSectionId {
  *                                       Null key's entries are appended to the end
  * entryOffsetSection      varied        bitmap entry offset list
  * statisticsSection       varied        keep the original statistics, not changed than before.
- * footerSection           48(8 + 5*8)   footer to save total key list size and length, total entry
- * Index version           8             list size, total offset list size, and also the original
+ * footerSection           44(4 + 5*8)   footer to save total key list size and length, total entry
+ * Index version number    4             list size, total offset list size, and also the original
  * Non-null key List Size  4             index end.
  * Non-Null key count      4
  * Non-null key Entry Size 4
@@ -183,7 +183,7 @@ private[oap] class BitmapIndexRecordWriter(
     // The beginning of the footer are bitmap total size, key list size and offset total size.
     // Others keep back compatible and not changed than before.
     bmIndexEnd = bmEntryListOffset + bmEntryListTotalSize + bmNullEntrySize + bmOffsetListTotalSize
-    IndexUtils.writeBytes(writer, IndexUtils.serializeVersion(IndexFile.VERSION_NUM))
+    IndexUtils.writeInt(writer, IndexFile.VERSION_NUM)
     IndexUtils.writeInt(writer, bmUniqueKeyListTotalSize)
     IndexUtils.writeInt(writer, bmUniqueKeyListCount)
     IndexUtils.writeInt(writer, bmEntryListTotalSize)
