@@ -24,6 +24,7 @@ import org.antlr.v4.runtime.tree.TerminalNode
 
 import org.apache.spark.sql.{AnalysisException, SaveMode}
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
+import org.apache.spark.sql.catalyst.analysis.UnresolvedRelation
 import org.apache.spark.sql.catalyst.catalog._
 import org.apache.spark.sql.catalyst.parser._
 import org.apache.spark.sql.catalyst.parser.SqlBaseParser._
@@ -1401,7 +1402,7 @@ class SparkSqlAstBuilder(conf: SQLConf) extends AstBuilder {
   }
 
   /**
-   * Create an index. Create a [[CreateIndex]] command.
+   * Create an index. Create a [[CreateIndexCommand]] command.
    *
    * {{{
    *   CREATE OINDEX [IF NOT EXISTS] indexName ON tableName (col1 [ASC | DESC], col2, ...)
@@ -1410,23 +1411,26 @@ class SparkSqlAstBuilder(conf: SQLConf) extends AstBuilder {
    */
   override def visitOapCreateIndex(ctx: OapCreateIndexContext): LogicalPlan =
     withOrigin(ctx) {
-      CreateIndex(
-        ctx.IDENTIFIER.getText, visitTableIdentifier(ctx.tableIdentifier()),
-        visitIndexCols(ctx.indexCols), ctx.EXISTS != null, visitIndexType(ctx.indexType),
+      CreateIndexCommand(
+        ctx.IDENTIFIER.getText,
+        UnresolvedRelation(visitTableIdentifier(ctx.tableIdentifier())),
+        visitIndexCols(ctx.indexCols),
+        ctx.EXISTS != null, visitIndexType(ctx.indexType),
         Option(ctx.partitionSpec).map(visitNonOptionalPartitionSpec))
     }
 
   /**
-   * Drop an index. Create a [[DropIndex]] command.
+   * Drop an index. Create a [[DropIndexCommand]] command.
    *
    * {{{
    *   DROP OINDEX [IF EXISTS] indexName on tableName [PARTITION (partcol1=val1, partcol2=val2 ...)]
    * }}}
    */
   override def visitOapDropIndex(ctx: OapDropIndexContext): LogicalPlan = withOrigin(ctx) {
-    DropIndex(
+    DropIndexCommand(
       ctx.IDENTIFIER.getText,
-      visitTableIdentifier(ctx.tableIdentifier), ctx.EXISTS != null,
+      UnresolvedRelation(visitTableIdentifier(ctx.tableIdentifier)),
+      ctx.EXISTS != null,
       Option(ctx.partitionSpec).map(visitNonOptionalPartitionSpec))
   }
 
@@ -1452,20 +1456,21 @@ class SparkSqlAstBuilder(conf: SQLConf) extends AstBuilder {
 
   override def visitOapRefreshIndices(ctx: OapRefreshIndicesContext): LogicalPlan =
     withOrigin(ctx) {
-      RefreshIndex(visitTableIdentifier(ctx.tableIdentifier),
+      RefreshIndexCommand(
+        UnresolvedRelation(visitTableIdentifier(ctx.tableIdentifier)),
         Option(ctx.partitionSpec).map(visitNonOptionalPartitionSpec))
     }
 
   override def visitOapShowIndex(ctx: OapShowIndexContext): LogicalPlan = withOrigin(ctx) {
     val tableName = visitTableIdentifier(ctx.tableIdentifier)
-    OapShowIndex(tableName, tableName.identifier)
+    OapShowIndexCommand(UnresolvedRelation(tableName), tableName.identifier)
   }
 
   override def visitOapCheckIndex(ctx: OapCheckIndexContext): LogicalPlan =
     withOrigin(ctx) {
       val tableIdentifier = visitTableIdentifier(ctx.tableIdentifier)
-      OapCheckIndex(
-        tableIdentifier,
+      OapCheckIndexCommand(
+        UnresolvedRelation(tableIdentifier),
         tableIdentifier.identifier,
         Option(ctx.partitionSpec).map(visitNonOptionalPartitionSpec))
     }

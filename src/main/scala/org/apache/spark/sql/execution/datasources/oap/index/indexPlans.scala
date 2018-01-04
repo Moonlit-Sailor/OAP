@@ -24,12 +24,10 @@ import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.spark.internal.Logging
 import org.apache.spark.internal.io.FileCommitProtocol
 import org.apache.spark.sql._
-import org.apache.spark.sql.catalyst.TableIdentifier
-import org.apache.spark.sql.catalyst.analysis.EliminateSubqueryAliases
+import org.apache.spark.sql.catalyst.analysis.UnresolvedRelation
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes._
-import org.apache.spark.sql.catalyst.catalog.SimpleCatalogRelation
 import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.plans.logical.Project
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Project}
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.datasources.oap._
@@ -42,20 +40,19 @@ import org.apache.spark.sql.types._
 /**
  * Creates an index for table on indexColumns
  */
-case class CreateIndex(
+case class CreateIndexCommand(
     indexName: String,
-    table: TableIdentifier,
+    unresolvedRelation: LogicalPlan,
     indexColumns: Array[IndexColumn],
     allowExists: Boolean,
     indexType: AnyIndexType,
     partitionSpec: Option[TablePartitionSpec]) extends RunnableCommand with Logging {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val relation =
-      EliminateSubqueryAliases(sparkSession.sessionState.catalog.lookupRelation(table)) match {
-        case r: SimpleCatalogRelation => (new FindDataSourceTable(sparkSession))(r)
-        case other => other
-      }
+    val qe = sparkSession.sessionState.executePlan(unresolvedRelation)
+    qe.assertAnalyzed()
+    val relation = qe.optimizedPlan
+
     val (fileCatalog, schema, readerClassName, identifier, fsRelation) = relation match {
       case LogicalRelation(
       _fsRelation @ HadoopFsRelation(f, _, s, _, _: OapFileFormat, _), _, id) =>
@@ -137,9 +134,6 @@ case class CreateIndex(
       (metaBuilder, parent, existOld)
     })
 
-    val partitionColumns = relation.resolve(
-      fsRelation.partitionSchema, fsRelation.sparkSession.sessionState.analyzer.resolver)
-
     val projectList = indexColumns.map { indexColumn =>
       relation.output.find(p => p.name == indexColumn.columnName).get.withMetadata(
         new MetadataBuilder().putBoolean("isAscending", indexColumn.isAscending).build())
@@ -203,20 +197,17 @@ case class CreateIndex(
 /**
  * Drops an index
  */
-case class DropIndex(
+case class DropIndexCommand(
     indexName: String,
-    table: TableIdentifier,
+    unresolvedRelation: UnresolvedRelation,
     allowNotExists: Boolean,
     partitionSpec: Option[TablePartitionSpec]) extends RunnableCommand {
 
-  override val output: Seq[Attribute] = Seq.empty
-
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val relation =
-      EliminateSubqueryAliases(sparkSession.sessionState.catalog.lookupRelation(table)) match {
-        case r: SimpleCatalogRelation => (new FindDataSourceTable(sparkSession))(r)
-        case other => other
-      }
+    val qe = sparkSession.sessionState.executePlan(unresolvedRelation)
+    qe.assertAnalyzed()
+    val relation = qe.optimizedPlan
+
     relation match {
       case LogicalRelation(HadoopFsRelation(fileCatalog, _, _, _, format, _), _, identifier)
           if format.isInstanceOf[OapFileFormat] || format.isInstanceOf[ParquetFileFormat] =>
@@ -271,18 +262,15 @@ case class DropIndex(
 /**
  * Refreshes an index for table
  */
-case class RefreshIndex(
-    table: TableIdentifier,
+case class RefreshIndexCommand(
+    unresolvedRelation: UnresolvedRelation,
     partitionSpec: Option[TablePartitionSpec]) extends RunnableCommand with Logging {
 
-  override val output: Seq[Attribute] = Seq.empty
-
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val relation =
-      EliminateSubqueryAliases(sparkSession.sessionState.catalog.lookupRelation(table)) match {
-        case r: SimpleCatalogRelation => (new FindDataSourceTable(sparkSession))(r)
-        case other => other
-      }
+    val qe = sparkSession.sessionState.executePlan(unresolvedRelation)
+    qe.assertAnalyzed()
+    val relation = qe.optimizedPlan
+
     val (fileCatalog, schema, readerClassName) = relation match {
       case LogicalRelation(
           HadoopFsRelation(f, _, s, _, _: OapFileFormat, _), _, _) =>
@@ -432,7 +420,7 @@ case class RefreshIndex(
 /**
  * List indices for table
  */
-case class OapShowIndex(table: TableIdentifier, relationName: String)
+case class OapShowIndexCommand(unresolvedRelation: UnresolvedRelation, relationName: String)
     extends RunnableCommand with Logging {
 
   override val output: Seq[Attribute] = {
@@ -445,11 +433,10 @@ case class OapShowIndex(table: TableIdentifier, relationName: String)
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val relation =
-      EliminateSubqueryAliases(sparkSession.sessionState.catalog.lookupRelation(table)) match {
-        case r: SimpleCatalogRelation => (new FindDataSourceTable(sparkSession))(r)
-        case other => other
-      }
+    val qe = sparkSession.sessionState.executePlan(unresolvedRelation)
+    qe.assertAnalyzed()
+    val relation = qe.optimizedPlan
+
     val (fileCatalog, schema) = relation match {
       case LogicalRelation(HadoopFsRelation(f, _, s, _, _, _), _, id) =>
         (f, s)
@@ -496,11 +483,11 @@ case class OapShowIndex(table: TableIdentifier, relationName: String)
  * 1. check existence of oap meta file
  * 2. check integrity of each partition directory of table for both data files
  *    and index files according to meta
- * @param table TableIdentifier of the specified table
+ * @param unresolvedRelation represents the unresolved table
  * @param tableName table name of the specified table
  */
-case class OapCheckIndex(
-    table: TableIdentifier,
+case class OapCheckIndexCommand(
+    unresolvedRelation: UnresolvedRelation,
     tableName: String,
     partitionSpec: Option[TablePartitionSpec]) extends RunnableCommand with Logging {
   override val output: Seq[Attribute] =
@@ -615,11 +602,9 @@ case class OapCheckIndex(
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val relation =
-      EliminateSubqueryAliases(sparkSession.sessionState.catalog.lookupRelation(table)) match {
-        case r: SimpleCatalogRelation => (new FindDataSourceTable(sparkSession))(r)
-        case other => other
-      }
+    val qe = sparkSession.sessionState.executePlan(unresolvedRelation)
+    qe.assertAnalyzed()
+    val relation = qe.optimizedPlan
 
     val (fileCatalog, dataSchema) = relation match {
       case LogicalRelation(HadoopFsRelation(f, _, s, _, _, _), _, id) =>
