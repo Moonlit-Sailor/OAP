@@ -42,14 +42,14 @@ import org.apache.spark.sql.types._
  */
 case class CreateIndexCommand(
     indexName: String,
-    unresolvedRelation: LogicalPlan,
+    table: LogicalPlan,
     indexColumns: Array[IndexColumn],
     allowExists: Boolean,
     indexType: AnyIndexType,
     partitionSpec: Option[TablePartitionSpec]) extends RunnableCommand with Logging {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val qe = sparkSession.sessionState.executePlan(unresolvedRelation)
+    val qe = sparkSession.sessionState.executePlan(table)
     qe.assertAnalyzed()
     val relation = qe.optimizedPlan
 
@@ -199,12 +199,12 @@ case class CreateIndexCommand(
  */
 case class DropIndexCommand(
     indexName: String,
-    unresolvedRelation: UnresolvedRelation,
+    table: LogicalPlan,
     allowNotExists: Boolean,
     partitionSpec: Option[TablePartitionSpec]) extends RunnableCommand {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val qe = sparkSession.sessionState.executePlan(unresolvedRelation)
+    val qe = sparkSession.sessionState.executePlan(table)
     qe.assertAnalyzed()
     val relation = qe.optimizedPlan
 
@@ -263,11 +263,11 @@ case class DropIndexCommand(
  * Refreshes an index for table
  */
 case class RefreshIndexCommand(
-    unresolvedRelation: UnresolvedRelation,
+    table: LogicalPlan,
     partitionSpec: Option[TablePartitionSpec]) extends RunnableCommand with Logging {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val qe = sparkSession.sessionState.executePlan(unresolvedRelation)
+    val qe = sparkSession.sessionState.executePlan(table)
     qe.assertAnalyzed()
     val relation = qe.optimizedPlan
 
@@ -420,7 +420,7 @@ case class RefreshIndexCommand(
 /**
  * List indices for table
  */
-case class OapShowIndexCommand(unresolvedRelation: UnresolvedRelation, relationName: String)
+case class OapShowIndexCommand(table: LogicalPlan, relationName: String)
     extends RunnableCommand with Logging {
 
   override val output: Seq[Attribute] = {
@@ -433,7 +433,7 @@ case class OapShowIndexCommand(unresolvedRelation: UnresolvedRelation, relationN
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val qe = sparkSession.sessionState.executePlan(unresolvedRelation)
+    val qe = sparkSession.sessionState.executePlan(table)
     qe.assertAnalyzed()
     val relation = qe.optimizedPlan
 
@@ -483,11 +483,11 @@ case class OapShowIndexCommand(unresolvedRelation: UnresolvedRelation, relationN
  * 1. check existence of oap meta file
  * 2. check integrity of each partition directory of table for both data files
  *    and index files according to meta
- * @param unresolvedRelation represents the unresolved table
+ * @param table represents the unresolved table
  * @param tableName table name of the specified table
  */
 case class OapCheckIndexCommand(
-    unresolvedRelation: UnresolvedRelation,
+    table: LogicalPlan,
     tableName: String,
     partitionSpec: Option[TablePartitionSpec]) extends RunnableCommand with Logging {
   override val output: Seq[Attribute] =
@@ -602,7 +602,7 @@ case class OapCheckIndexCommand(
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val qe = sparkSession.sessionState.executePlan(unresolvedRelation)
+    val qe = sparkSession.sessionState.executePlan(table)
     qe.assertAnalyzed()
     val relation = qe.optimizedPlan
 
