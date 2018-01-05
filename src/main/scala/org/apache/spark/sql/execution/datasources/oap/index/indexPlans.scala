@@ -26,9 +26,11 @@ import org.apache.spark.internal.io.FileCommitProtocol
 import org.apache.spark.scheduler.cluster.CoarseGrainedSchedulerBackend
 import org.apache.spark.scheduler.local.LocalSchedulerBackend
 import org.apache.spark.sql._
+import org.apache.spark.sql.catalyst.TableIdentifier
+import org.apache.spark.sql.catalyst.analysis.UnresolvedRelation
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes._
 import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, Project}
+import org.apache.spark.sql.catalyst.plans.logical.Project
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.datasources.oap._
@@ -45,14 +47,14 @@ import org.apache.spark.sql.types._
  */
 case class CreateIndexCommand(
     indexName: String,
-    table: LogicalPlan,
+    table: TableIdentifier,
     indexColumns: Array[IndexColumn],
     allowExists: Boolean,
     indexType: AnyIndexType,
     partitionSpec: Option[TablePartitionSpec]) extends RunnableCommand with Logging {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val qe = sparkSession.sessionState.executePlan(table)
+    val qe = sparkSession.sessionState.executePlan(UnresolvedRelation(table))
     qe.assertAnalyzed()
     val relation = qe.optimizedPlan
 
@@ -200,12 +202,12 @@ case class CreateIndexCommand(
  */
 case class DropIndexCommand(
     indexName: String,
-    table: LogicalPlan,
+    table: TableIdentifier,
     allowNotExists: Boolean,
     partitionSpec: Option[TablePartitionSpec]) extends RunnableCommand {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val qe = sparkSession.sessionState.executePlan(table)
+    val qe = sparkSession.sessionState.executePlan(UnresolvedRelation(table))
     qe.assertAnalyzed()
     val relation = qe.optimizedPlan
 
@@ -270,11 +272,11 @@ case class DropIndexCommand(
  * Refreshes an index for table
  */
 case class RefreshIndexCommand(
-    table: LogicalPlan,
+    table: TableIdentifier,
     partitionSpec: Option[TablePartitionSpec]) extends RunnableCommand with Logging {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val qe = sparkSession.sessionState.executePlan(table)
+    val qe = sparkSession.sessionState.executePlan(UnresolvedRelation(table))
     qe.assertAnalyzed()
     val relation = qe.optimizedPlan
 
@@ -427,7 +429,7 @@ case class RefreshIndexCommand(
 /**
  * List indices for table
  */
-case class OapShowIndexCommand(table: LogicalPlan, relationName: String)
+case class OapShowIndexCommand(table: TableIdentifier, relationName: String)
     extends RunnableCommand with Logging {
 
   override val output: Seq[Attribute] = {
@@ -440,7 +442,7 @@ case class OapShowIndexCommand(table: LogicalPlan, relationName: String)
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val qe = sparkSession.sessionState.executePlan(table)
+    val qe = sparkSession.sessionState.executePlan(UnresolvedRelation(table))
     qe.assertAnalyzed()
     val relation = qe.optimizedPlan
 
@@ -490,11 +492,11 @@ case class OapShowIndexCommand(table: LogicalPlan, relationName: String)
  * 1. check existence of oap meta file
  * 2. check integrity of each partition directory of table for both data files
  *    and index files according to meta
- * @param table represents the unresolved table
+ * @param table represents the table identifier
  * @param tableName table name of the specified table
  */
 case class OapCheckIndexCommand(
-    table: LogicalPlan,
+    table: TableIdentifier,
     tableName: String,
     partitionSpec: Option[TablePartitionSpec]) extends RunnableCommand with Logging {
   override val output: Seq[Attribute] =
@@ -609,7 +611,7 @@ case class OapCheckIndexCommand(
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val qe = sparkSession.sessionState.executePlan(table)
+    val qe = sparkSession.sessionState.executePlan(UnresolvedRelation(table))
     qe.assertAnalyzed()
     val relation = qe.optimizedPlan
 

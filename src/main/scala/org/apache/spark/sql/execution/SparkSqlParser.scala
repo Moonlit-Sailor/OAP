@@ -24,7 +24,6 @@ import org.antlr.v4.runtime.tree.TerminalNode
 
 import org.apache.spark.sql.{AnalysisException, SaveMode}
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
-import org.apache.spark.sql.catalyst.analysis.UnresolvedRelation
 import org.apache.spark.sql.catalyst.catalog._
 import org.apache.spark.sql.catalyst.parser._
 import org.apache.spark.sql.catalyst.parser.SqlBaseParser._
@@ -1413,7 +1412,7 @@ class SparkSqlAstBuilder(conf: SQLConf) extends AstBuilder {
     withOrigin(ctx) {
       CreateIndexCommand(
         ctx.IDENTIFIER.getText,
-        UnresolvedRelation(visitTableIdentifier(ctx.tableIdentifier())),
+        visitTableIdentifier(ctx.tableIdentifier()),
         visitIndexCols(ctx.indexCols),
         ctx.EXISTS != null, visitIndexType(ctx.indexType),
         Option(ctx.partitionSpec).map(visitNonOptionalPartitionSpec))
@@ -1429,7 +1428,7 @@ class SparkSqlAstBuilder(conf: SQLConf) extends AstBuilder {
   override def visitOapDropIndex(ctx: OapDropIndexContext): LogicalPlan = withOrigin(ctx) {
     DropIndexCommand(
       ctx.IDENTIFIER.getText,
-      UnresolvedRelation(visitTableIdentifier(ctx.tableIdentifier)),
+      visitTableIdentifier(ctx.tableIdentifier),
       ctx.EXISTS != null,
       Option(ctx.partitionSpec).map(visitNonOptionalPartitionSpec))
   }
@@ -1457,20 +1456,20 @@ class SparkSqlAstBuilder(conf: SQLConf) extends AstBuilder {
   override def visitOapRefreshIndices(ctx: OapRefreshIndicesContext): LogicalPlan =
     withOrigin(ctx) {
       RefreshIndexCommand(
-        UnresolvedRelation(visitTableIdentifier(ctx.tableIdentifier)),
+        visitTableIdentifier(ctx.tableIdentifier),
         Option(ctx.partitionSpec).map(visitNonOptionalPartitionSpec))
     }
 
   override def visitOapShowIndex(ctx: OapShowIndexContext): LogicalPlan = withOrigin(ctx) {
     val tableName = visitTableIdentifier(ctx.tableIdentifier)
-    OapShowIndexCommand(UnresolvedRelation(tableName), tableName.identifier)
+    OapShowIndexCommand(tableName, tableName.identifier)
   }
 
   override def visitOapCheckIndex(ctx: OapCheckIndexContext): LogicalPlan =
     withOrigin(ctx) {
       val tableIdentifier = visitTableIdentifier(ctx.tableIdentifier)
       OapCheckIndexCommand(
-        UnresolvedRelation(tableIdentifier),
+        tableIdentifier,
         tableIdentifier.identifier,
         Option(ctx.partitionSpec).map(visitNonOptionalPartitionSpec))
     }
