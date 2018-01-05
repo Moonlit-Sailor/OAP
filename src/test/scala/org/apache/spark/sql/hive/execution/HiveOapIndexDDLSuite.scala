@@ -22,19 +22,21 @@ import java.io.File
 import org.apache.hadoop.fs.Path
 import org.scalatest.BeforeAndAfterEach
 
-import org.apache.spark.sql.{QueryTest, Row}
+import org.apache.spark.sql.{QueryTest, Row, SparkSession}
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.catalog.CatalogTableType
 import org.apache.spark.sql.execution.datasources.oap.utils.OapUtils
-import org.apache.spark.sql.hive.test.TestHiveSingleton
+import org.apache.spark.sql.hive.test.TestHive
 import org.apache.spark.sql.test.SQLTestUtils
 import org.apache.spark.util.Utils
 
 
 // test OAP Index DDL&DML on Hive tables
 class HiveOapIndexDDLSuite
-  extends QueryTest with SQLTestUtils with TestHiveSingleton with BeforeAndAfterEach {
-  import spark.implicits._
+  extends QueryTest with SQLTestUtils with BeforeAndAfterEach {
+  import testImplicits._
+
+  override def spark: SparkSession = TestHive.sparkSession
 
   override def afterEach(): Unit = {
     try {
@@ -43,6 +45,11 @@ class HiveOapIndexDDLSuite
     } finally {
       super.afterEach()
     }
+  }
+
+  override def afterAll(): Unit = {
+    spark.stop()
+    super.afterAll()
   }
 
 
